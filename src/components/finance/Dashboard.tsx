@@ -13,6 +13,19 @@ import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/h
 export function Dashboard() {
   const { transactions, budgets, regularPayments, currentMonth, categories, settings, accounts, goals } = useFinanceStore()
 
+  // Helper function for formatting money - defined first
+  const formatMoney = (amount: number, currency: string = 'RUB') => {
+    if (amount === null || amount === undefined || isNaN(amount) || !isFinite(amount)) {
+      return '0 ₽'
+    }
+    return new Intl.NumberFormat('ru-RU', {
+      style: 'currency',
+      currency: currency,
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 2
+    }).format(amount)
+  }
+
   // Filter transactions for current month
   const [year, month] = currentMonth.split('-').map(Number)
   const monthStart = startOfMonth(new Date(year, month - 1))
@@ -183,18 +196,6 @@ export function Dashboard() {
   // Goals progress
   const totalGoalTarget = safeGoals.filter(g => !g.isCompleted).reduce((sum, g) => sum + (g.targetAmount || 0), 0)
   const totalGoalSaved = safeGoals.filter(g => !g.isCompleted).reduce((sum, g) => sum + (g.currentAmount || 0), 0)
-
-  const formatMoney = (amount: number, currency: string = 'RUB') => {
-    if (amount === null || amount === undefined || isNaN(amount) || !isFinite(amount)) {
-      return '0 ₽'
-    }
-    return new Intl.NumberFormat('ru-RU', {
-      style: 'currency',
-      currency: currency,
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 2
-    }).format(amount)
-  }
 
   const recentTransactions = monthTransactions.slice(0, 5)
 
