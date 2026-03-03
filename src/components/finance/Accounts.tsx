@@ -11,10 +11,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Plus, Pencil, Trash2, ArrowRightLeft, Wallet, PiggyBank, Banknote, TrendingUp, LineChart, ArrowUpRight, ArrowDownRight } from 'lucide-react'
+import { Plus, Pencil, Trash2, ArrowRightLeft, Wallet, PiggyBank, Banknote, TrendingUp, LineChart, ArrowUpRight, ArrowDownRight, Calendar as CalendarIcon } from 'lucide-react'
 import { LineChart as RechartsLineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, AreaChart } from 'recharts'
 import { format, parseISO } from 'date-fns'
 import { ru } from 'date-fns/locale'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Calendar } from '@/components/ui/calendar'
 
 const ACCOUNT_TYPES = [
   { value: 'main', label: 'Основной', icon: 'Wallet', color: '#4ECDC4' },
@@ -31,6 +33,7 @@ interface AccountFormData {
   currency: string
   balance: string
   color: string
+  changeDate?: Date
 }
 
 interface TransferFormData {
@@ -54,6 +57,7 @@ interface AccountHistoryStats {
   minBalance: number
   maxBalance: number
   change: number
+  historyRecordsCount: number
 }
 
 const initialFormData: AccountFormData = {
@@ -61,7 +65,8 @@ const initialFormData: AccountFormData = {
   type: 'savings',
   currency: 'RUB',
   balance: '0',
-  color: '#96CEB4'
+  color: '#96CEB4',
+  changeDate: undefined
 }
 
 export function Accounts() {
@@ -84,6 +89,7 @@ export function Accounts() {
   const [historyData, setHistoryData] = useState<AccountHistory[]>([])
   const [historyStats, setHistoryStats] = useState<AccountHistoryStats | null>(null)
   const [isLoadingHistory, setIsLoadingHistory] = useState(false)
+  const [hasHistory, setHasHistory] = useState(false)
 
   const safeAccounts = Array.isArray(accounts) ? accounts : []
 
@@ -101,6 +107,7 @@ export function Accounts() {
       const data = await response.json()
       setHistoryData(data.history || [])
       setHistoryStats(data.stats || null)
+      setHasHistory(data.hasHistory || false)
     } catch (error) {
       console.error('Error fetching account history:', error)
     } finally {
@@ -125,7 +132,8 @@ export function Accounts() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             ...formData,
-            balance: parseFloat(formData.balance) || 0
+            balance: parseFloat(formData.balance) || 0,
+            changeDate: formData.changeDate?.toISOString()
           })
         })
         const data = await response.json()
@@ -185,7 +193,8 @@ export function Accounts() {
       type: account.type,
       currency: account.currency || 'RUB',
       balance: String(account.balance || 0),
-      color: account.color || '#96CEB4'
+      color: account.color || '#96CEB4',
+      changeDate: undefined
     })
     setIsDialogOpen(true)
   }
@@ -361,7 +370,7 @@ export function Accounts() {
                     </div>
 
                     <div className="space-y-2">
-                      <Label>Начальный баланс</Label>
+                      <Label>Баланс</Label>
                       <Input
                         type="number"
                         step="0.01"
@@ -369,6 +378,37 @@ export function Accounts() {
                         onChange={(e) => setFormData({ ...formData, balance: e.target.value })}
                       />
                     </div>
+
+                    {/* Date picker for balance change - only when editing */}
+                    {editingAccount && (
+                      <div className="space-y-2">
+                        <Label className="flex items-center gap-2">
+                          <CalendarIcon className="h-4 w-4" />
+                          Дата изменения баланса
+                        </Label>
+                        <Popover>
+                          <PopoverTrigger asChild>
+                            <Button variant="outline" className="w-full justify-start text-left font-normal">
+                              {formData.changeDate 
+                                ? format(formData.changeDate, 'd MMMM yyyy', { locale: ru })
+                                : 'Сегодня (по умолчанию)'
+                              }
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-auto p-0">
+                            <Calendar
+                              mode="single"
+                              selected={formData.changeDate}
+                              onSelect={(date) => setFormData({ ...formData, changeDate: date })}
+                              initialFocus
+                            />
+                          </PopoverContent>
+                        </Popover>
+                        <p className="text-xs text-muted-foreground">
+                          Выберите дату, когда произошло изменение баланса (для корректного графика динамики)
+                        </p>
+                      </div>
+                    )}
 
                     <div className="space-y-2">
                       <Label>Цвет</Label>
@@ -525,6 +565,14 @@ export function Accounts() {
             </div>
           ) : (
             <div className="space-y-6">
+              {/* No History Warning */}
+              {!hasHistory && historyStats?.historyRecordsCount === 0 && (
+                <div className="p-3 rounded-lg bg-yellow-50 border border-yellow-200 text-yellow-800 text-sm">
+                  <p className="font-medium">Нет истории изменений баланса</p>
+                  <p className="text-xs mt-1">Изменяйте баланс через форму редактирования счёта для отслеживания динамики. При изменении баланса будет создаваться точка на графике.</p>
+                </div>
+              )}
+
               {/* Stats Cards */}
               {historyStats && (
                 <div className="grid grid-cols-4 gap-3">

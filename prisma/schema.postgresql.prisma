@@ -90,20 +90,36 @@ model Settings {
 }
 
 model Account {
-  id           String          @id @default(cuid())
-  name         String
-  type         String          // "main", "savings", "cash", "investment"
-  currency     String          @default("RUB")
-  balance      Float           @default(0)
-  color        String?
-  icon         String?
-  isActive     Boolean         @default(true)
-  transactions Transaction[]
-  goals        FinancialGoal[]
-  createdAt    DateTime        @default(now())
-  updatedAt    DateTime        @updatedAt
+  id             String           @id @default(cuid())
+  name           String
+  type           String           // "main", "savings", "cash", "investment"
+  currency       String           @default("RUB")
+  balance        Float            @default(0)
+  color          String?
+  icon           String?
+  isActive       Boolean          @default(true)
+  transactions   Transaction[]
+  goals          FinancialGoal[]
+  balanceHistory BalanceHistory[]
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
 
   @@index([type])
+}
+
+model BalanceHistory {
+  id        String   @id @default(cuid())
+  accountId String
+  account   Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  balance   Float
+  change    Float    @default(0) // Change amount (positive or negative)
+  reason    String?  // "transaction", "manual_update", "transfer_in", "transfer_out"
+  referenceId String? // Transaction ID or transfer reference
+  date      DateTime @default(now())
+  createdAt DateTime @default(now())
+
+  @@index([accountId])
+  @@index([date])
 }
 
 model FinancialGoal {

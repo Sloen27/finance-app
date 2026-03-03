@@ -4,8 +4,8 @@ import { useFinanceStore } from '@/store/finance'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
 import { Badge } from '@/components/ui/badge'
-import { TrendingUp, TrendingDown, Wallet, Calendar, ArrowUpRight, ArrowDownRight, PiggyBank, Target, Shield, AlertTriangle, ShoppingCart, Sparkles, BarChart3, Coins, Info } from 'lucide-react'
-import { format, isAfter, isBefore, startOfMonth, endOfMonth, differenceInDays, subMonths } from 'date-fns'
+import { TrendingUp, TrendingDown, Wallet, Calendar, ArrowUpRight, ArrowDownRight, PiggyBank, Target, Shield, AlertTriangle, ShoppingCart, Sparkles, BarChart3, Coins, Info, Calculator } from 'lucide-react'
+import { format, isAfter, isBefore, startOfMonth, endOfMonth, differenceInDays, subMonths, getDaysInMonth } from 'date-fns'
 import { ru } from 'date-fns/locale'
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend } from 'recharts'
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card'
@@ -45,6 +45,14 @@ export function Dashboard() {
   // Calculate expenses by type (for financial cushion)
   const mandatoryExpenses = monthTransactions
     .filter(t => t.type === 'expense' && t.category?.expenseType === 'mandatory')
+    .reduce((sum, t) => sum + (t.amount || 0), 0)
+
+  const variableExpenses = monthTransactions
+    .filter(t => t.type === 'expense' && t.category?.expenseType === 'variable')
+    .reduce((sum, t) => sum + (t.amount || 0), 0)
+
+  const discretionaryExpenses = monthTransactions
+    .filter(t => t.type === 'expense' && t.category?.expenseType === 'discretionary')
     .reduce((sum, t) => sum + (t.amount || 0), 0)
 
   // Expenses by category for pie chart
@@ -102,16 +110,60 @@ export function Dashboard() {
   const totalBalance = safeAccounts.reduce((sum, a) => sum + (a.balance || 0), 0)
   const totalInvestments = safeAccounts.filter(a => a.type === 'investment').reduce((sum, a) => sum + (a.balance || 0), 0)
 
-  const avgMandatoryExpenses = mandatoryExpenses || 1
-  const financialCushionMonths = (totalSavings + mainBalance) / avgMandatoryExpenses
+  // Calculate average mandatory expenses over last 3 months for more accurate cushion
+  const last3MonthsMandatory = Array.from({ length: 3 }, (_, i) => {
+    const date = subMonths(new Date(), i)
+    const monthStr = format(date, 'yyyy-MM')
+    const monthTx = safeTransactions.filter(t => {
+      const txDate = new Date(t.date)
+      return format(txDate, 'yyyy-MM') === monthStr && t.type === 'expense' && t.category?.expenseType === 'mandatory'
+    })
+    return monthTx.reduce((sum, t) => sum + (t.amount || 0), 0)
+  })
+  const avgMonthlyMandatory = last3MonthsMandatory.reduce((sum, m) => sum + m, 0) / 3
+  const currentMonthMandatory = mandatoryExpenses || 1
+  
+  // Use average if we have data, otherwise use current month
+  const effectiveMandatoryExpenses = avgMonthlyMandatory > 0 ? avgMonthlyMandatory : currentMonthMandatory
+  const financialCushionMonths = effectiveMandatoryExpenses > 0 
+    ? (totalSavings + mainBalance) / effectiveMandatoryExpenses 
+    : 0
 
   // Calculate upcoming regular payments amount until end of month
   const upcomingPaymentsTotal = activePayments
     .filter(p => p.period === 'monthly' && p.dueDate && p.dueDate >= today.getDate())
     .reduce((sum, p) => sum + (p.amount || 0), 0)
 
-  // Month end forecast with regular payments
+  // Month end forecast with detailed calculation
   const monthEndForecast = totalBalance - upcomingPaymentsTotal + totalIncome - totalExpense
+
+  // Detailed forecast breakdown
+  const forecastDetails = {
+    currentBalance: totalBalance,
+    monthIncome: totalIncome,
+    monthExpense: totalExpense,
+    upcomingPayments: upcomingPaymentsTotal,
+    daysRemaining,
+    daysPassed,
+    daysInMonth,
+    dailyAverage,
+    projectedExpense,
+    projectedBalance,
+    monthEndForecast
+  }
+
+  // Detailed cushion breakdown
+  const cushionDetails = {
+    totalSavings,
+    mainBalance,
+    availableFunds: totalSavings + mainBalance,
+    mandatoryExpenses,
+    avgMonthlyMandatory,
+    currentMonthMandatory,
+    effectiveMandatoryExpenses,
+    financialCushionMonths,
+    formula: `${formatMoney(totalSavings + mainBalance)} ÷ ${formatMoney(effectiveMandatoryExpenses)} = ${financialCushionMonths.toFixed(1)} мес.`
+  }
 
   // Cash flow for last 6 months
   const cashFlowData = Array.from({ length: 6 }, (_, i) => {
@@ -229,57 +281,115 @@ export function Dashboard() {
                 </CardContent>
               </div>
             </HoverCardTrigger>
-            <HoverCardContent className="w-80">
+            <HoverCardContent className="w-96">
               <div className="space-y-4">
                 <div className="flex items-center gap-2">
-                  <Shield className="h-5 w-5 text-primary" />
-                  <h4 className="font-semibold">Финансовая подушка</h4>
+                  <Calculator className="h-5 w-5 text-primary" />
+                  <h4 className="font-semibold">Детальный расчёт</h4>
                 </div>
                 
                 <div className="space-y-3">
-                  {/* Total Balance */}
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm text-muted-foreground">Общий баланс</span>
-                    <span className="font-semibold">{formatMoney(totalBalance)}</span>
-                  </div>
-                  
-                  {/* Financial Cushion */}
-                  <div className="p-2 rounded-lg bg-muted">
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm">Запас на</span>
-                      <span className="font-bold text-lg">{isFinite(financialCushionMonths) ? financialCushionMonths.toFixed(1) : '0'} мес.</span>
+                  {/* Account Breakdown */}
+                  <div className="p-3 rounded-lg bg-muted">
+                    <p className="text-sm font-medium mb-2">Структура средств</p>
+                    <div className="space-y-1.5 text-sm">
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Основные счета</span>
+                        <span className="font-medium">{formatMoney(mainBalance)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Накопления</span>
+                        <span className="font-medium text-green-600">{formatMoney(totalSavings)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Инвестиции</span>
+                        <span className="font-medium text-blue-600">{formatMoney(totalInvestments)}</span>
+                      </div>
+                      <div className="flex justify-between pt-1.5 border-t font-semibold">
+                        <span>Итого</span>
+                        <span>{formatMoney(totalBalance)}</span>
+                      </div>
                     </div>
-                    <Progress value={Math.min(financialCushionMonths * 20, 100)} className="mt-2 h-1.5" />
+                  </div>
+
+                  {/* Financial Cushion with Formula */}
+                  <div className="p-3 rounded-lg border">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Shield className="h-4 w-4 text-primary" />
+                      <p className="text-sm font-medium">Финансовая подушка</p>
+                    </div>
+                    
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm">Запас на</span>
+                        <span className="font-bold text-lg">{isFinite(cushionDetails.financialCushionMonths) ? cushionDetails.financialCushionMonths.toFixed(1) : '0'} мес.</span>
+                      </div>
+                      <Progress value={Math.min(cushionDetails.financialCushionMonths * 20, 100)} className="h-2" />
+                      
+                      {/* Formula */}
+                      <div className="mt-3 p-2 rounded bg-muted/50 text-xs">
+                        <p className="text-muted-foreground mb-1">Формула расчёта:</p>
+                        <p className="font-mono">
+                          ({formatMoney(cushionDetails.totalSavings)} + {formatMoney(cushionDetails.mainBalance)}) ÷ {formatMoney(cushionDetails.effectiveMandatoryExpenses)}
+                        </p>
+                        <p className="font-mono font-semibold mt-1">
+                          = {cushionDetails.financialCushionMonths.toFixed(1)} месяцев
+                        </p>
+                      </div>
+
+                      {/* Details */}
+                      <div className="text-xs text-muted-foreground space-y-1">
+                        <p>• Доступные средства: {formatMoney(cushionDetails.availableFunds)}</p>
+                        <p>• Ср. обязательные расходы: {formatMoney(cushionDetails.effectiveMandatoryExpenses)}/мес</p>
+                        {cushionDetails.avgMonthlyMandatory > 0 && (
+                          <p className="text-xs">• Среднее за 3 месяца</p>
+                        )}
+                      </div>
+                    </div>
                   </div>
 
                   {/* Month End Forecast */}
-                  <div className="border-t pt-3">
+                  <div className="p-3 rounded-lg border">
                     <div className="flex items-center gap-2 mb-2">
                       <Calendar className="h-4 w-4 text-muted-foreground" />
-                      <span className="text-sm font-medium">Прогноз на конец месяца</span>
+                      <p className="text-sm font-medium">Прогноз на конец месяца</p>
                     </div>
                     
                     <div className="space-y-2 text-sm">
-                      <div className="flex items-center justify-between">
+                      {/* Formula */}
+                      <div className="p-2 rounded bg-muted/50 text-xs">
+                        <p className="text-muted-foreground mb-1">Формула:</p>
+                        <p className="font-mono">
+                          {formatMoney(forecastDetails.currentBalance)}
+                          {' '}- {formatMoney(forecastDetails.upcomingPayments)}
+                          {' '}+ {formatMoney(forecastDetails.monthIncome)}
+                          {' '}- {formatMoney(forecastDetails.monthExpense)}
+                        </p>
+                        <p className="font-mono font-semibold mt-1">
+                          = {formatMoney(forecastDetails.monthEndForecast)}
+                        </p>
+                      </div>
+
+                      <div className="flex justify-between">
                         <span className="text-muted-foreground">Текущий баланс</span>
-                        <span>{formatMoney(totalBalance)}</span>
+                        <span>{formatMoney(forecastDetails.currentBalance)}</span>
                       </div>
-                      <div className="flex items-center justify-between">
+                      <div className="flex justify-between">
                         <span className="text-muted-foreground">Доходы за месяц</span>
-                        <span className="text-green-600">+{formatMoney(totalIncome)}</span>
+                        <span className="text-green-600">+{formatMoney(forecastDetails.monthIncome)}</span>
                       </div>
-                      <div className="flex items-center justify-between">
+                      <div className="flex justify-between">
                         <span className="text-muted-foreground">Расходы за месяц</span>
-                        <span className="text-red-600">-{formatMoney(totalExpense)}</span>
+                        <span className="text-red-600">-{formatMoney(forecastDetails.monthExpense)}</span>
                       </div>
-                      <div className="flex items-center justify-between">
+                      <div className="flex justify-between">
                         <span className="text-muted-foreground">Ожидаемые платежи</span>
-                        <span className="text-red-600">-{formatMoney(upcomingPaymentsTotal)}</span>
+                        <span className="text-red-600">-{formatMoney(forecastDetails.upcomingPayments)}</span>
                       </div>
-                      <div className="flex items-center justify-between pt-2 border-t font-semibold">
-                        <span>Итого</span>
-                        <span className={monthEndForecast >= 0 ? 'text-green-600' : 'text-red-600'}>
-                          {formatMoney(monthEndForecast)}
+                      <div className="flex justify-between pt-1.5 border-t font-semibold">
+                        <span>Прогноз</span>
+                        <span className={forecastDetails.monthEndForecast >= 0 ? 'text-green-600' : 'text-red-600'}>
+                          {formatMoney(forecastDetails.monthEndForecast)}
                         </span>
                       </div>
                     </div>
@@ -383,40 +493,130 @@ export function Dashboard() {
           </CardHeader>
           <CardContent className="space-y-4">
             {/* Forecast */}
-            <div className="p-3 rounded-lg bg-muted/50">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-medium">Прогноз на конец месяца</span>
-                <Badge variant={projectedBalance >= 0 ? 'default' : 'destructive'}>
-                  {projectedBalance >= 0 ? 'Профицит' : 'Дефицит'}
-                </Badge>
-              </div>
-              <div className={`text-xl font-bold ${projectedBalance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                {formatMoney(projectedBalance)}
-              </div>
-              <p className="text-xs text-muted-foreground mt-1">
-                Дней до конца: {daysRemaining} • Средний расход: {formatMoney(dailyAverage)}/день
-              </p>
-            </div>
+            <HoverCard>
+              <HoverCardTrigger asChild>
+                <div className="p-3 rounded-lg bg-muted/50 cursor-pointer hover:bg-muted/70 transition-colors">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-sm font-medium flex items-center gap-1">
+                      Прогноз на конец месяца
+                      <Info className="h-3 w-3 text-muted-foreground" />
+                    </span>
+                    <Badge variant={projectedBalance >= 0 ? 'default' : 'destructive'}>
+                      {projectedBalance >= 0 ? 'Профицит' : 'Дефицит'}
+                    </Badge>
+                  </div>
+                  <div className={`text-xl font-bold ${projectedBalance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                    {formatMoney(projectedBalance)}
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Дней до конца: {daysRemaining} • Средний расход: {formatMoney(dailyAverage)}/день
+                  </p>
+                </div>
+              </HoverCardTrigger>
+              <HoverCardContent className="w-80">
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <Calculator className="h-4 w-4" />
+                    <h4 className="font-semibold text-sm">Детали прогноза</h4>
+                  </div>
+                  
+                  <div className="space-y-1.5 text-sm">
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Дней в месяце</span>
+                      <span>{forecastDetails.daysInMonth}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Дней прошло</span>
+                      <span>{forecastDetails.daysPassed}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Дней осталось</span>
+                      <span>{forecastDetails.daysRemaining}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Средний расход/день</span>
+                      <span>{formatMoney(forecastDetails.dailyAverage)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Прогноз расходов</span>
+                      <span className="text-red-600">{formatMoney(forecastDetails.projectedExpense)}</span>
+                    </div>
+                    <div className="flex justify-between pt-1.5 border-t font-semibold">
+                      <span>Прогноз баланса</span>
+                      <span className={forecastDetails.projectedBalance >= 0 ? 'text-green-600' : 'text-red-600'}>
+                        {formatMoney(forecastDetails.projectedBalance)}
+                      </span>
+                    </div>
+                  </div>
+                  
+                  <div className="p-2 rounded bg-muted text-xs">
+                    <p className="text-muted-foreground">Формула:</p>
+                    <p className="font-mono">{formatMoney(totalIncome)} - {formatMoney(forecastDetails.projectedExpense)}</p>
+                  </div>
+                </div>
+              </HoverCardContent>
+            </HoverCard>
 
             {/* Financial Cushion */}
-            <div className="p-3 rounded-lg bg-muted/50">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-medium flex items-center gap-2">
-                  <Shield className="h-4 w-4" />
-                  Финансовая подушка
-                </span>
-              </div>
-              <div className="flex items-end gap-2">
-                <span className="text-2xl font-bold">
-                  {isFinite(financialCushionMonths) ? financialCushionMonths.toFixed(1) : '0'}
-                </span>
-                <span className="text-muted-foreground">месяцев</span>
-              </div>
-              <Progress value={Math.min(financialCushionMonths * 20, 100)} className="mt-2 h-2" />
-              <p className="text-xs text-muted-foreground mt-1">
-                {financialCushionMonths >= 6 ? 'Отличный запас!' : financialCushionMonths >= 3 ? 'Хороший уровень' : 'Рекомендуется увеличить'}
-              </p>
-            </div>
+            <HoverCard>
+              <HoverCardTrigger asChild>
+                <div className="p-3 rounded-lg bg-muted/50 cursor-pointer hover:bg-muted/70 transition-colors">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-sm font-medium flex items-center gap-2">
+                      <Shield className="h-4 w-4" />
+                      Финансовая подушка
+                      <Info className="h-3 w-3 text-muted-foreground" />
+                    </span>
+                  </div>
+                  <div className="flex items-end gap-2">
+                    <span className="text-2xl font-bold">
+                      {isFinite(financialCushionMonths) ? financialCushionMonths.toFixed(1) : '0'}
+                    </span>
+                    <span className="text-muted-foreground">месяцев</span>
+                  </div>
+                  <Progress value={Math.min(financialCushionMonths * 20, 100)} className="mt-2 h-2" />
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {financialCushionMonths >= 6 ? 'Отличный запас!' : financialCushionMonths >= 3 ? 'Хороший уровень' : 'Рекомендуется увеличить'}
+                  </p>
+                </div>
+              </HoverCardTrigger>
+              <HoverCardContent className="w-80">
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <Shield className="h-4 w-4" />
+                    <h4 className="font-semibold text-sm">Расчёт подушки безопасности</h4>
+                  </div>
+                  
+                  <div className="space-y-1.5 text-sm">
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Накопления</span>
+                      <span className="text-green-600">{formatMoney(cushionDetails.totalSavings)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Основные счета</span>
+                      <span>{formatMoney(cushionDetails.mainBalance)}</span>
+                    </div>
+                    <div className="flex justify-between pt-1.5 border-t">
+                      <span className="text-muted-foreground">Доступно</span>
+                      <span className="font-semibold">{formatMoney(cushionDetails.availableFunds)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Обязательные расходы/мес</span>
+                      <span className="text-red-600">{formatMoney(cushionDetails.effectiveMandatoryExpenses)}</span>
+                    </div>
+                  </div>
+                  
+                  <div className="p-2 rounded bg-muted text-xs">
+                    <p className="text-muted-foreground mb-1">Формула:</p>
+                    <p className="font-mono">{cushionDetails.formula}</p>
+                  </div>
+                  
+                  <div className="text-xs text-muted-foreground">
+                    <p>Рекомендуется иметь запас на 3-6 месяцев</p>
+                  </div>
+                </div>
+              </HoverCardContent>
+            </HoverCard>
           </CardContent>
         </Card>
       </div>

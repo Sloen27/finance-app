@@ -38,20 +38,46 @@ export async function PUT(
   try {
     const { id } = await params
     const body = await request.json()
-    const { name, type, currency, balance, color, icon, isActive } = body
+    const { name, type, currency, balance, color, icon, isActive, changeDate } = body
 
+    // Get current account to check balance change
+    const currentAccount = await db.account.findUnique({
+      where: { id }
+    })
+
+    if (!currentAccount) {
+      return NextResponse.json({ error: 'Account not found' }, { status: 404 })
+    }
+
+    const newBalance = balance !== undefined ? parseFloat(balance) : currentAccount.balance
+    const balanceChange = newBalance - currentAccount.balance
+
+    // Update account
     const account = await db.account.update({
       where: { id },
       data: {
         name,
         type,
         currency,
-        balance: balance !== undefined ? parseFloat(balance) : undefined,
+        balance: newBalance,
         color: color || null,
         icon: icon || null,
         isActive: isActive !== undefined ? isActive : undefined
       }
     })
+
+    // Record balance history if balance changed
+    if (balanceChange !== 0) {
+      await db.balanceHistory.create({
+        data: {
+          accountId: id,
+          balance: newBalance,
+          change: balanceChange,
+          reason: 'manual_update',
+          date: changeDate ? new Date(changeDate) : new Date()
+        }
+      })
+    }
 
     return NextResponse.json(account)
   } catch (error) {

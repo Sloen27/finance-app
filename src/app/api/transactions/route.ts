@@ -9,12 +9,14 @@ export async function GET(request: Request) {
     const categoryId = searchParams.get('categoryId')
     const type = searchParams.get('type') // income or expense
     const currency = searchParams.get('currency')
+    const accountId = searchParams.get('accountId')
 
     const where: {
       date?: { gte: Date; lte: Date }
       categoryId?: string
       type?: string
       currency?: string
+      accountId?: string
     } = {}
 
     if (month) {
@@ -36,10 +38,15 @@ export async function GET(request: Request) {
       where.currency = currency
     }
 
+    if (accountId) {
+      where.accountId = accountId
+    }
+
     const transactions = await db.transaction.findMany({
       where,
       include: {
-        category: true
+        category: true,
+        account: true
       },
       orderBy: { date: 'desc' }
     })
@@ -55,21 +62,55 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const body = await request.json()
-    const { type, amount, currency, categoryId, date, comment } = body
+    const { type, amount, currency, categoryId, accountId, date, comment } = body
 
+    const transactionAmount = parseFloat(amount)
+    const transactionDate = new Date(date)
+
+    // Create transaction
     const transaction = await db.transaction.create({
       data: {
         type,
-        amount: parseFloat(amount),
+        amount: transactionAmount,
         currency: currency || 'RUB',
         categoryId,
-        date: new Date(date),
+        accountId: accountId || null,
+        date: transactionDate,
         comment: comment || null
       },
       include: {
-        category: true
+        category: true,
+        account: true
       }
     })
+
+    // If transaction is linked to an account, update balance and record history
+    if (accountId) {
+      const account = await db.account.findUnique({ where: { id: accountId } })
+      if (account) {
+        const balanceChange = type === 'income' ? transactionAmount : -transactionAmount
+        const newBalance = account.balance + balanceChange
+
+        await db.$transaction([
+          // Update account balance
+          db.account.update({
+            where: { id: accountId },
+            data: { balance: newBalance }
+          }),
+          // Record balance history
+          db.balanceHistory.create({
+            data: {
+              accountId,
+              balance: newBalance,
+              change: balanceChange,
+              reason: 'transaction',
+              referenceId: transaction.id,
+              date: transactionDate
+            }
+          })
+        ])
+      }
+    }
 
     return NextResponse.json(transaction)
   } catch (error) {
