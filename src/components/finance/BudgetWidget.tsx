@@ -34,6 +34,7 @@ import {
 } from 'lucide-react'
 import { format } from 'date-fns'
 import { ru } from 'date-fns/locale'
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts'
 
 export function BudgetWidget() {
   const { monthlyIncome, budgetStats, setMonthlyIncome, setBudgetStats, currentMonth } = useFinanceStore()
@@ -68,9 +69,14 @@ export function BudgetWidget() {
           const statsData = await statsResponse.json()
           setBudgetStats(statsData)
         }
+      } else {
+        const error = await response.json()
+        console.error('Error saving income:', error)
+        alert('Ошибка при сохранении: ' + (error.details || error.error || 'Неизвестная ошибка'))
       }
     } catch (error) {
       console.error('Error saving income:', error)
+      alert('Ошибка при сохранении дохода')
     } finally {
       setIsLoading(false)
       setIsEditingIncome(false)
@@ -107,8 +113,15 @@ export function BudgetWidget() {
     ? Math.min(100, (mandatorySpent / mandatoryTotal) * 100)
     : 0
 
+  // Data for pie chart
+  const pieData = [
+    { name: 'Обязательные', value: mandatoryTotal, color: '#3b82f6' },
+    { name: 'Потрачено др.', value: otherExpenses + mandatoryOverspent, color: '#f97316' },
+    { name: 'Осталось', value: Math.max(0, actualRemaining), color: '#22c55e' }
+  ].filter(d => d.value > 0)
+
   return (
-    <Card className="col-span-full lg:col-span-2">
+    <Card className="col-span-full">
       <CardHeader>
         <div className="flex items-center justify-between">
           <div>
@@ -180,37 +193,88 @@ export function BudgetWidget() {
             </Button>
           </div>
         ) : (
-          <>
-            {/* Main Budget Display */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              {/* Planned Income */}
-              <div className="p-3 rounded-lg bg-green-50 dark:bg-green-950/30">
-                <div className="text-sm text-muted-foreground">Доход</div>
-                <div className="text-xl font-bold text-green-600">
-                  {formatMoney(plannedIncome)}
-                </div>
-                {monthlyIncome?.isFromPrevious && (
-                  <div className="text-xs text-muted-foreground mt-1">
-                    Из предыдущего месяца
+          <div className="grid gap-6 lg:grid-cols-2">
+            {/* Left side - Chart */}
+            <div className="flex flex-col items-center justify-center">
+              <div className="w-full max-w-[250px] h-[250px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={pieData}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={60}
+                      outerRadius={90}
+                      dataKey="value"
+                      label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                      labelLine={false}
+                    >
+                      {pieData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.color} />
+                      ))}
+                    </Pie>
+                    <Tooltip formatter={(value: number) => formatMoney(value)} />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+
+              {/* Legend */}
+              <div className="flex flex-wrap gap-4 mt-4 justify-center">
+                {pieData.map((item) => (
+                  <div key={item.name} className="flex items-center gap-2">
+                    <div className="w-3 h-3 rounded-full" style={{ backgroundColor: item.color }} />
+                    <span className="text-sm">{item.name}</span>
                   </div>
-                )}
+                ))}
+              </div>
+            </div>
+
+            {/* Right side - Details */}
+            <div className="space-y-4">
+              {/* Main Stats */}
+              <div className="grid grid-cols-2 gap-3">
+                {/* Planned Income */}
+                <div className="p-3 rounded-lg bg-green-50 dark:bg-green-950/30">
+                  <div className="text-sm text-muted-foreground">Доход</div>
+                  <div className="text-xl font-bold text-green-600">
+                    {formatMoney(plannedIncome)}
+                  </div>
+                </div>
+
+                {/* Remaining */}
+                <div className={`p-3 rounded-lg ${
+                  actualRemaining >= 0
+                    ? 'bg-emerald-50 dark:bg-emerald-950/30'
+                    : 'bg-red-50 dark:bg-red-950/30'
+                }`}>
+                  <div className="text-sm text-muted-foreground">Осталось</div>
+                  <div className={`text-xl font-bold ${
+                    actualRemaining >= 0 ? 'text-emerald-600' : 'text-red-600'
+                  }`}>
+                    {formatMoney(actualRemaining)}
+                  </div>
+                </div>
               </div>
 
               {/* Mandatory Budget */}
               <HoverCard>
                 <HoverCardTrigger asChild>
                   <div className="p-3 rounded-lg bg-blue-50 dark:bg-blue-950/30 cursor-pointer">
-                    <div className="text-sm text-muted-foreground flex items-center gap-1">
-                      Обязательные
-                      <Info className="h-3 w-3" />
+                    <div className="flex items-center justify-between mb-1">
+                      <div className="text-sm text-muted-foreground flex items-center gap-1">
+                        Обязательные расходы
+                        <Info className="h-3 w-3" />
+                      </div>
+                      <span className="text-sm font-medium">
+                        {mandatorySpent > 0 ? `${formatMoney(mandatorySpent)} / ` : ''}{formatMoney(mandatoryTotal)}
+                      </span>
                     </div>
-                    <div className="text-xl font-bold text-blue-600">
-                      {formatMoney(mandatoryTotal)}
-                    </div>
-                    <Progress
-                      value={mandatoryProgress}
-                      className="mt-2 h-1.5"
-                    />
+                    <Progress value={mandatoryProgress} className="h-2" />
+                    {mandatoryOverspent > 0 && (
+                      <div className="text-xs text-red-500 mt-1">
+                        Перерасход: {formatMoney(mandatoryOverspent)}
+                      </div>
+                    )}
                   </div>
                 </HoverCardTrigger>
                 <HoverCardContent className="w-80">
@@ -239,7 +303,7 @@ export function BudgetWidget() {
                         ))
                       ) : (
                         <p className="text-muted-foreground">
-                          Нет обязательных категорий с бюджетом
+                          Нет обязательных категорий с бюджетом. Добавьте категории и установите им бюджет.
                         </p>
                       )}
                     </div>
@@ -249,39 +313,16 @@ export function BudgetWidget() {
 
               {/* Other Expenses */}
               <div className="p-3 rounded-lg bg-orange-50 dark:bg-orange-950/30">
-                <div className="text-sm text-muted-foreground">Другие расходы</div>
-                <div className="text-xl font-bold text-orange-600">
-                  {formatMoney(otherExpenses + mandatoryOverspent)}
-                </div>
-                {mandatoryOverspent > 0 && (
-                  <div className="text-xs text-red-500 mt-1">
-                    Перерасход: {formatMoney(mandatoryOverspent)}
+                <div className="flex items-center justify-between">
+                  <div className="text-sm text-muted-foreground">Другие расходы</div>
+                  <div className="text-lg font-bold text-orange-600">
+                    {formatMoney(otherExpenses + mandatoryOverspent)}
                   </div>
-                )}
-              </div>
-
-              {/* Remaining */}
-              <div className={`p-3 rounded-lg ${
-                actualRemaining >= 0
-                  ? 'bg-emerald-50 dark:bg-emerald-950/30'
-                  : 'bg-red-50 dark:bg-red-950/30'
-              }`}>
-                <div className="text-sm text-muted-foreground">Осталось</div>
-                <div className={`text-xl font-bold ${
-                  actualRemaining >= 0 ? 'text-emerald-600' : 'text-red-600'
-                }`}>
-                  {formatMoney(actualRemaining)}
                 </div>
-                <Progress
-                  value={remainingPercent}
-                  className={`mt-2 h-1.5 ${remainingPercent < 20 ? '[&>div]:bg-red-500' : ''}`}
-                />
               </div>
-            </div>
 
-            {/* Detailed Breakdown */}
-            <div className="border-t pt-4">
-              <div className="flex items-center gap-2 mb-3">
+              {/* Status */}
+              <div className="flex items-center gap-2">
                 {actualRemaining >= 0 ? (
                   <CheckCircle2 className="h-4 w-4 text-green-500" />
                 ) : (
@@ -293,87 +334,52 @@ export function BudgetWidget() {
                     : 'Превышение бюджета'}
                 </span>
               </div>
-
-              {/* Formula explanation */}
-              <div className="bg-muted/50 rounded-lg p-3 text-sm space-y-1">
-                <div className="flex items-center gap-2">
-                  <ArrowUpRight className="h-4 w-4 text-green-500" />
-                  <span>Доход: <strong>{formatMoney(plannedIncome)}</strong></span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <ArrowDownRight className="h-4 w-4 text-blue-500" />
-                  <span>
-                    Обязательные расходы: <strong>-{formatMoney(mandatoryTotal)}</strong>
-                    {mandatorySpent > 0 && (
-                      <span className="text-muted-foreground ml-1">
-                        (потрачено: {formatMoney(mandatorySpent)})
-                      </span>
-                    )}
-                  </span>
-                </div>
-                {mandatoryOverspent > 0 && (
-                  <div className="flex items-center gap-2 text-red-600">
-                    <TrendingDown className="h-4 w-4" />
-                    <span>
-                      Перерасход обязательных: <strong>-{formatMoney(mandatoryOverspent)}</strong>
-                    </span>
-                  </div>
-                )}
-                <div className="flex items-center gap-2">
-                  <ArrowDownRight className="h-4 w-4 text-orange-500" />
-                  <span>Другие расходы: <strong>-{formatMoney(otherExpenses)}</strong></span>
-                </div>
-                <div className="border-t pt-2 mt-2 flex items-center gap-2 font-semibold">
-                  <Wallet className="h-4 w-4" />
-                  <span>Итого осталось: {formatMoney(actualRemaining)}</span>
-                </div>
-              </div>
             </div>
+          </div>
+        )}
 
-            {/* Mandatory Categories Detail */}
-            {categoryStats.length > 0 && (
-              <div className="border-t pt-4">
-                <h4 className="text-sm font-medium mb-3">По обязательным категориям</h4>
-                <div className="space-y-3">
-                  {categoryStats.map((cat) => {
-                    const progress = cat.budget > 0 ? (cat.spent / cat.budget) * 100 : 0
-                    const isOverBudget = cat.spent > cat.budget
+        {/* Mandatory Categories Detail */}
+        {plannedIncome > 0 && categoryStats.length > 0 && (
+          <div className="border-t pt-4">
+            <h4 className="text-sm font-medium mb-3">По обязательным категориям</h4>
+            <div className="grid gap-3 md:grid-cols-2">
+              {categoryStats.map((cat) => {
+                const progress = cat.budget > 0 ? (cat.spent / cat.budget) * 100 : 0
+                const isOverBudget = cat.spent > cat.budget
 
-                    return (
-                      <div key={cat.id} className="space-y-1">
-                        <div className="flex items-center justify-between text-sm">
-                          <div className="flex items-center gap-2">
-                            <div
-                              className="w-2 h-2 rounded-full"
-                              style={{ backgroundColor: cat.color || '#888' }}
-                            />
-                            <span>{cat.name}</span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <span className={isOverBudget ? 'text-red-600 font-medium' : ''}>
-                              {formatMoney(cat.spent)}
-                            </span>
-                            <span className="text-muted-foreground">
-                              / {formatMoney(cat.budget)}
-                            </span>
-                            {isOverBudget && (
-                              <Badge variant="destructive" className="text-xs">
-                                +{formatMoney(cat.overspent)}
-                              </Badge>
-                            )}
-                          </div>
-                        </div>
-                        <Progress
-                          value={Math.min(progress, 100)}
-                          className={`h-1.5 ${isOverBudget ? '[&>div]:bg-red-500' : progress > 80 ? '[&>div]:bg-yellow-500' : ''}`}
+                return (
+                  <div key={cat.id} className="p-3 rounded-lg border space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <div
+                          className="w-3 h-3 rounded-full"
+                          style={{ backgroundColor: cat.color || '#888' }}
                         />
+                        <span className="font-medium">{cat.name}</span>
                       </div>
-                    )
-                  })}
-                </div>
-              </div>
-            )}
-          </>
+                      {isOverBudget && (
+                        <Badge variant="destructive" className="text-xs">
+                          +{formatMoney(cat.overspent)}
+                        </Badge>
+                      )}
+                    </div>
+                    <div className="flex items-center justify-between text-sm">
+                      <span className={isOverBudget ? 'text-red-600 font-medium' : ''}>
+                        {formatMoney(cat.spent)}
+                      </span>
+                      <span className="text-muted-foreground">
+                        из {formatMoney(cat.budget)}
+                      </span>
+                    </div>
+                    <Progress
+                      value={Math.min(progress, 100)}
+                      className={`h-2 ${isOverBudget ? '[&>div]:bg-red-500' : progress > 80 ? '[&>div]:bg-yellow-500' : ''}`}
+                    />
+                  </div>
+                )
+              })}
+            </div>
+          </div>
         )}
       </CardContent>
     </Card>
