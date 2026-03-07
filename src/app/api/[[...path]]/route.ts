@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { hashPassword, verifyPassword } from '@/lib/auth'
+import { hashPassword, verifyPassword, encryptSession } from '@/lib/auth'
 import { startOfMonth, endOfMonth, subMonths, format } from 'date-fns'
 
 // Helper to extract path segments
@@ -724,77 +724,162 @@ async function handleBudgetStats(method: string, request: NextRequest) {
 
 // === AUTH ===
 async function handleAuth(method: string, action: string | undefined, request: NextRequest) {
-  if (action === 'check') {
-    const settings = await db.settings.findFirst()
-    return NextResponse.json({ hasPassword: !!settings?.passwordHash })
+  try {
+    if (action === 'check') {
+      try {
+        const settings = await db.settings.findFirst()
+        return NextResponse.json({ hasPassword: !!settings?.passwordHash })
+      } catch (dbError) {
+        // Settings table doesn't exist yet
+        console.error('Settings table error:', dbError)
+        return NextResponse.json({ hasPassword: false })
+      }
+    }
+    
+    if (action === 'setup' && method === 'POST') {
+      const body = await request.json()
+      const { password, confirmPassword } = body
+      
+      if (!password || password.length < 4) {
+        return NextResponse.json({ error: 'Пароль должен быть не менее 4 символов' }, { status: 400 })
+      }
+      
+      if (password !== confirmPassword) {
+        return NextResponse.json({ error: 'Пароли не совпадают' }, { status: 400 })
+      }
+      
+      let settings
+      try {
+        settings = await db.settings.findFirst()
+      } catch (dbError: any) {
+        // Table doesn't exist, will create
+        console.log('Settings table not found, creating...', dbError?.message)
+      }
+      
+      if (settings?.passwordHash) {
+        return NextResponse.json({ error: 'Пароль уже установлен' }, { status: 400 })
+      }
+      
+      const passwordHash = hashPassword(password)
+      
+      if (settings) {
+        await db.settings.update({ where: { id: settings.id }, data: { passwordHash } })
+      } else {
+        settings = await db.settings.create({ 
+          data: { 
+            passwordHash,
+            rubToUsdRate: 0.011,
+            theme: 'light',
+            mandatoryPercent: 50,
+            variablePercent: 30,
+            savingsPercent: 10,
+            investmentsPercent: 10
+          } 
+        })
+      }
+      
+      // Create session token
+      const expiresAt = Date.now() + 7 * 24 * 60 * 60 * 1000 // 7 days
+      const token = encryptSession({ userId: 'user', expiresAt })
+      
+      // Create response with session cookie
+      const response = NextResponse.json({ success: true })
+      response.cookies.set('session', token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 7 * 24 * 60 * 60, // 7 days
+        path: '/',
+      })
+      
+      return response
+    }
+    
+    if (action === 'login' && method === 'POST') {
+      const body = await request.json()
+      const { password } = body
+      
+      if (!password) {
+        return NextResponse.json({ error: 'Введите пароль' }, { status: 400 })
+      }
+      
+      let settings
+      try {
+        settings = await db.settings.findFirst()
+      } catch (dbError: any) {
+        console.error('Settings table error on login:', dbError)
+        return NextResponse.json({ 
+          error: 'Ошибка базы данных', 
+          details: dbError?.message || 'Settings table may not exist'
+        }, { status: 500 })
+      }
+      
+      if (!settings?.passwordHash) {
+        return NextResponse.json({ error: 'Пароль не установлен. Выполните настройку.' }, { status: 400 })
+      }
+      
+      let isValid = false
+      try {
+        isValid = verifyPassword(password, settings.passwordHash)
+      } catch (verifyError: any) {
+        console.error('Password verify error:', verifyError)
+        return NextResponse.json({ 
+          error: 'Ошибка проверки пароля', 
+          details: verifyError?.message 
+        }, { status: 500 })
+      }
+      
+      if (!isValid) {
+        return NextResponse.json({ error: 'Неверный пароль' }, { status: 401 })
+      }
+      
+      // Create session token
+      const expiresAt = Date.now() + 7 * 24 * 60 * 60 * 1000 // 7 days
+      const token = encryptSession({ userId: 'user', expiresAt })
+      
+      // Create response with session cookie
+      const response = NextResponse.json({ success: true })
+      response.cookies.set('session', token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 7 * 24 * 60 * 60, // 7 days
+        path: '/',
+      })
+      
+      return response
+    }
+    
+    if (action === 'change-password' && method === 'POST') {
+      const { currentPassword, newPassword } = await request.json()
+      const settings = await db.settings.findFirst()
+      
+      if (!settings?.passwordHash) {
+        return NextResponse.json({ error: 'Пароль не установлен' }, { status: 400 })
+      }
+      
+      if (!verifyPassword(currentPassword, settings.passwordHash)) {
+        return NextResponse.json({ error: 'Неверный текущий пароль' }, { status: 401 })
+      }
+      
+      await db.settings.update({
+        where: { id: settings.id },
+        data: { passwordHash: hashPassword(newPassword) }
+      })
+      
+      return NextResponse.json({ success: true })
+    }
+    
+    if (action === 'logout') {
+      return NextResponse.json({ success: true })
+    }
+    
+    return NextResponse.json({ error: 'Invalid auth action' }, { status: 400 })
+  } catch (error) {
+    console.error('Auth handler error:', error)
+    return NextResponse.json({ 
+      error: 'Ошибка авторизации', 
+      details: error instanceof Error ? error.message : 'Unknown error' 
+    }, { status: 500 })
   }
-  
-  if (action === 'setup' && method === 'POST') {
-    const { password, confirmPassword } = await request.json()
-    
-    if (!password || password.length < 4) {
-      return NextResponse.json({ error: 'Пароль должен быть не менее 4 символов' }, { status: 400 })
-    }
-    
-    if (password !== confirmPassword) {
-      return NextResponse.json({ error: 'Пароли не совпадают' }, { status: 400 })
-    }
-    
-    let settings = await db.settings.findFirst()
-    
-    if (settings?.passwordHash) {
-      return NextResponse.json({ error: 'Пароль уже установлен' }, { status: 400 })
-    }
-    
-    const passwordHash = hashPassword(password)
-    
-    if (settings) {
-      await db.settings.update({ where: { id: settings.id }, data: { passwordHash } })
-    } else {
-      await db.settings.create({ data: { passwordHash } })
-    }
-    
-    return NextResponse.json({ success: true })
-  }
-  
-  if (action === 'login' && method === 'POST') {
-    const { password } = await request.json()
-    const settings = await db.settings.findFirst()
-    
-    if (!settings?.passwordHash) {
-      return NextResponse.json({ error: 'Пароль не установлен' }, { status: 400 })
-    }
-    
-    if (!verifyPassword(password, settings.passwordHash)) {
-      return NextResponse.json({ error: 'Неверный пароль' }, { status: 401 })
-    }
-    
-    return NextResponse.json({ success: true })
-  }
-  
-  if (action === 'change-password' && method === 'POST') {
-    const { currentPassword, newPassword } = await request.json()
-    const settings = await db.settings.findFirst()
-    
-    if (!settings?.passwordHash) {
-      return NextResponse.json({ error: 'Пароль не установлен' }, { status: 400 })
-    }
-    
-    if (!verifyPassword(currentPassword, settings.passwordHash)) {
-      return NextResponse.json({ error: 'Неверный текущий пароль' }, { status: 401 })
-    }
-    
-    await db.settings.update({
-      where: { id: settings.id },
-      data: { passwordHash: hashPassword(newPassword) }
-    })
-    
-    return NextResponse.json({ success: true })
-  }
-  
-  if (action === 'logout') {
-    return NextResponse.json({ success: true })
-  }
-  
-  return NextResponse.json({ error: 'Invalid auth action' }, { status: 400 })
 }
