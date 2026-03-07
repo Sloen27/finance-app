@@ -2,9 +2,56 @@ import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { startOfMonth, endOfMonth, subMonths, format } from 'date-fns'
 
+// SQL to create tables if they don't exist (PostgreSQL)
+const CREATE_TABLES_SQL = `
+CREATE TABLE IF NOT EXISTS "MonthlyIncome" (
+    "id" TEXT NOT NULL,
+    "amount" DOUBLE PRECISION NOT NULL,
+    "currency" TEXT NOT NULL DEFAULT 'RUB',
+    "month" TEXT NOT NULL,
+    "source" TEXT,
+    "isRecurring" BOOLEAN NOT NULL DEFAULT true,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+    CONSTRAINT "MonthlyIncome_pkey" PRIMARY KEY ("id")
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS "MonthlyIncome_month_key" ON "MonthlyIncome"("month");
+CREATE INDEX IF NOT EXISTS "MonthlyIncome_month_idx" ON "MonthlyIncome"("month");
+
+CREATE TABLE IF NOT EXISTS "MonthlyBudgetStats" (
+    "id" TEXT NOT NULL,
+    "month" TEXT NOT NULL,
+    "plannedIncome" DOUBLE PRECISION NOT NULL DEFAULT 0,
+    "mandatoryBudgetTotal" DOUBLE PRECISION NOT NULL DEFAULT 0,
+    "mandatorySpent" DOUBLE PRECISION NOT NULL DEFAULT 0,
+    "mandatoryOverspent" DOUBLE PRECISION NOT NULL DEFAULT 0,
+    "otherExpenses" DOUBLE PRECISION NOT NULL DEFAULT 0,
+    "remainingBudget" DOUBLE PRECISION NOT NULL DEFAULT 0,
+    "actualRemaining" DOUBLE PRECISION NOT NULL DEFAULT 0,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+    CONSTRAINT "MonthlyBudgetStats_pkey" PRIMARY KEY ("id")
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS "MonthlyBudgetStats_month_key" ON "MonthlyBudgetStats"("month");
+CREATE INDEX IF NOT EXISTS "MonthlyBudgetStats_month_idx" ON "MonthlyBudgetStats"("month");
+`
+
+// Ensure tables exist
+async function ensureTables() {
+  try {
+    await db.$executeRawUnsafe(CREATE_TABLES_SQL)
+  } catch (error) {
+    console.log('Tables creation skipped (may already exist):', error)
+  }
+}
+
 // GET - Get budget stats for current or specified month
 export async function GET(request: Request) {
   try {
+    await ensureTables()
+
     const { searchParams } = new URL(request.url)
     const month = searchParams.get('month') || getCurrentMonth()
 

@@ -1,9 +1,39 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 
+// SQL to create MonthlyIncome table if it doesn't exist (PostgreSQL)
+const CREATE_MONTHLY_INCOME_TABLE = `
+CREATE TABLE IF NOT EXISTS "MonthlyIncome" (
+    "id" TEXT NOT NULL,
+    "amount" DOUBLE PRECISION NOT NULL,
+    "currency" TEXT NOT NULL DEFAULT 'RUB',
+    "month" TEXT NOT NULL,
+    "source" TEXT,
+    "isRecurring" BOOLEAN NOT NULL DEFAULT true,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+    CONSTRAINT "MonthlyIncome_pkey" PRIMARY KEY ("id")
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS "MonthlyIncome_month_key" ON "MonthlyIncome"("month");
+CREATE INDEX IF NOT EXISTS "MonthlyIncome_month_idx" ON "MonthlyIncome"("month");
+`
+
+// Ensure table exists
+async function ensureTable() {
+  try {
+    await db.$executeRawUnsafe(CREATE_MONTHLY_INCOME_TABLE)
+  } catch (error) {
+    // Table might already exist, ignore error
+    console.log('Table creation skipped (may already exist):', error)
+  }
+}
+
 // GET - Get income for current or specified month
 export async function GET(request: Request) {
   try {
+    await ensureTable()
+
     const { searchParams } = new URL(request.url)
     const month = searchParams.get('month') || getCurrentMonth()
 
@@ -39,6 +69,8 @@ export async function GET(request: Request) {
 // POST - Create or update income for a month
 export async function POST(request: Request) {
   try {
+    await ensureTable()
+
     const body = await request.json()
     const { amount, month = getCurrentMonth(), source, isRecurring = true } = body
 
