@@ -172,53 +172,128 @@ async function handleCategories(method: string, id: string | undefined, request:
 
 // === TRANSACTIONS ===
 async function handleTransactions(method: string, id: string | undefined, request: NextRequest) {
-  const { searchParams } = new URL(request.url)
-  
-  if (method === 'GET') {
-    const month = searchParams.get('month')
-    if (month) {
-      const [year, monthNum] = month.split('-').map(Number)
-      const startDate = new Date(year, monthNum - 1, 1)
-      const endDate = new Date(year, monthNum, 0, 23, 59, 59)
+  try {
+    const { searchParams } = new URL(request.url)
+
+    if (method === 'GET') {
+      const month = searchParams.get('month')
+      if (month) {
+        const [year, monthNum] = month.split('-').map(Number)
+        const startDate = new Date(year, monthNum - 1, 1)
+        const endDate = new Date(year, monthNum, 0, 23, 59, 59)
+        const transactions = await db.transaction.findMany({
+          where: { date: { gte: startDate, lte: endDate } },
+          include: { category: true, account: true },
+          orderBy: { date: 'desc' }
+        })
+        return NextResponse.json(transactions)
+      }
       const transactions = await db.transaction.findMany({
-        where: { date: { gte: startDate, lte: endDate } },
         include: { category: true, account: true },
         orderBy: { date: 'desc' }
       })
       return NextResponse.json(transactions)
     }
-    const transactions = await db.transaction.findMany({
-      include: { category: true, account: true },
-      orderBy: { date: 'desc' }
-    })
-    return NextResponse.json(transactions)
+
+    if (method === 'POST') {
+      let body
+      try {
+        body = await request.json()
+      } catch (parseError) {
+        console.error('Failed to parse request body:', parseError)
+        return NextResponse.json({ error: 'Invalid JSON in request body' }, { status: 400 })
+      }
+
+      console.log('Transaction POST body:', JSON.stringify(body))
+
+      const { type, amount, categoryId, date, currency = 'RUB', comment, accountId } = body
+
+      // Validate required fields
+      if (!categoryId) {
+        return NextResponse.json({ error: 'categoryId is required' }, { status: 400 })
+      }
+
+      if (!date) {
+        return NextResponse.json({ error: 'date is required' }, { status: 400 })
+      }
+
+      // Parse and validate amount
+      let parsedAmount = typeof amount === 'string' ? parseFloat(amount) : amount
+      if (typeof parsedAmount !== 'number' || isNaN(parsedAmount)) {
+        return NextResponse.json({ error: 'Invalid amount', received: amount }, { status: 400 })
+      }
+
+      // Parse date
+      const parsedDate = new Date(date)
+      if (isNaN(parsedDate.getTime())) {
+        return NextResponse.json({ error: 'Invalid date format', received: date }, { status: 400 })
+      }
+
+      // Verify category exists
+      const category = await db.category.findUnique({ where: { id: categoryId } })
+      if (!category) {
+        return NextResponse.json({ error: 'Category not found', categoryId }, { status: 404 })
+      }
+
+      // Create transaction
+      const transaction = await db.transaction.create({
+        data: {
+          type: type || 'expense',
+          amount: parsedAmount,
+          currency,
+          categoryId,
+          date: parsedDate,
+          comment: comment || null,
+          accountId: accountId || null
+        },
+        include: { category: true, account: true }
+      })
+
+      console.log('Created transaction:', transaction.id)
+      return NextResponse.json(transaction)
+    }
+
+    if (method === 'PUT' && id) {
+      let body
+      try {
+        body = await request.json()
+      } catch (parseError) {
+        return NextResponse.json({ error: 'Invalid JSON in request body' }, { status: 400 })
+      }
+
+      const updateData: any = { ...body }
+      if (body.date) {
+        updateData.date = new Date(body.date)
+        if (isNaN(updateData.date.getTime())) {
+          return NextResponse.json({ error: 'Invalid date format' }, { status: 400 })
+        }
+      }
+      if (body.amount !== undefined) {
+        updateData.amount = typeof body.amount === 'string' ? parseFloat(body.amount) : body.amount
+      }
+
+      const transaction = await db.transaction.update({
+        where: { id },
+        data: updateData,
+        include: { category: true, account: true }
+      })
+      return NextResponse.json(transaction)
+    }
+
+    if (method === 'DELETE' && id) {
+      await db.transaction.delete({ where: { id } })
+      return NextResponse.json({ success: true })
+    }
+
+    return NextResponse.json({ error: 'Method not allowed' }, { status: 405 })
+  } catch (error) {
+    console.error('Transaction handler error:', error)
+    return NextResponse.json({
+      error: 'Failed to process transaction request',
+      details: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined
+    }, { status: 500 })
   }
-  
-  if (method === 'POST') {
-    const body = await request.json()
-    const transaction = await db.transaction.create({
-      data: { ...body, date: new Date(body.date) },
-      include: { category: true, account: true }
-    })
-    return NextResponse.json(transaction)
-  }
-  
-  if (method === 'PUT' && id) {
-    const body = await request.json()
-    const transaction = await db.transaction.update({
-      where: { id },
-      data: { ...body, date: body.date ? new Date(body.date) : undefined },
-      include: { category: true, account: true }
-    })
-    return NextResponse.json(transaction)
-  }
-  
-  if (method === 'DELETE' && id) {
-    await db.transaction.delete({ where: { id } })
-    return NextResponse.json({ success: true })
-  }
-  
-  return NextResponse.json({ error: 'Method not allowed' }, { status: 405 })
 }
 
 // === ACCOUNTS ===
