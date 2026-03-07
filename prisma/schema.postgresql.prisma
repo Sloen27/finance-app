@@ -133,3 +133,36 @@ model Investment {
 
   @@index([date])
 }
+
+// Ежемесячный доход пользователя
+model MonthlyIncome {
+  id          String   @id @default(cuid())
+  amount      Float
+  currency    String   @default("RUB")
+  month       String   // Format: "YYYY-MM" - for which month this income is set
+  source      String?  // Optional: "salary", "freelance", etc.
+  isRecurring Boolean  @default(true) // Auto-repeat every month
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([month]) // One income record per month
+  @@index([month])
+}
+
+// Статистика бюджета по месяцам
+model MonthlyBudgetStats {
+  id                    String   @id @default(cuid())
+  month                 String   // Format: "YYYY-MM"
+  plannedIncome         Float    @default(0) // Запланированный доход
+  mandatoryBudgetTotal  Float    @default(0) // Сумма бюджетов обязательных категорий
+  mandatorySpent        Float    @default(0) // Потрачено по обязательным категориям
+  mandatoryOverspent    Float    @default(0) // Перерасход по обязательным (считается как обычный расход)
+  otherExpenses         Float    @default(0) // Другие расходы
+  remainingBudget       Float    @default(0) // Остаток бюджета
+  actualRemaining       Float    @default(0) // Фактический остаток с учётом всех трат
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@unique([month])
+  @@index([month])
+}
