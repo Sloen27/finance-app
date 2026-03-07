@@ -271,7 +271,7 @@ async function handleAccounts(method: string, id: string | undefined, subResourc
 // === BUDGETS ===
 async function handleBudgets(method: string, id: string | undefined, request: NextRequest) {
   const { searchParams } = new URL(request.url)
-  
+
   if (method === 'GET') {
     const month = searchParams.get('month')
     const where = month ? { month } : {}
@@ -282,29 +282,65 @@ async function handleBudgets(method: string, id: string | undefined, request: Ne
     })
     return NextResponse.json(budgets)
   }
-  
+
   if (method === 'POST') {
-    const body = await request.json()
-    const budget = await db.budget.upsert({
-      where: { categoryId_month: { categoryId: body.categoryId, month: body.month } },
-      update: { amount: body.amount },
-      create: body,
-      include: { category: true }
-    })
-    return NextResponse.json(budget)
+    try {
+      const body = await request.json()
+      let { categoryId, amount, month = getCurrentMonth() } = body
+
+      if (!categoryId) {
+        return NextResponse.json({ error: 'categoryId is required' }, { status: 400 })
+      }
+      
+      // Convert amount to number if it's a string
+      if (typeof amount === 'string') {
+        amount = parseFloat(amount)
+      }
+      
+      if (typeof amount !== 'number' || isNaN(amount) || amount < 0) {
+        return NextResponse.json({ error: 'Invalid amount' }, { status: 400 })
+      }
+
+      // Try to find existing budget first
+      const existing = await db.budget.findFirst({
+        where: { categoryId, month }
+      })
+
+      let budget
+      if (existing) {
+        budget = await db.budget.update({
+          where: { id: existing.id },
+          data: { amount },
+          include: { category: true }
+        })
+      } else {
+        budget = await db.budget.create({
+          data: { categoryId, amount, month },
+          include: { category: true }
+        })
+      }
+
+      return NextResponse.json(budget)
+    } catch (error) {
+      console.error('Budget POST error:', error)
+      return NextResponse.json({
+        error: 'Failed to save budget',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      }, { status: 500 })
+    }
   }
-  
+
   if (method === 'PUT' && id) {
     const body = await request.json()
     const budget = await db.budget.update({ where: { id }, data: body, include: { category: true } })
     return NextResponse.json(budget)
   }
-  
+
   if (method === 'DELETE' && id) {
     await db.budget.delete({ where: { id } })
     return NextResponse.json({ success: true })
   }
-  
+
   return NextResponse.json({ error: 'Method not allowed' }, { status: 405 })
 }
 

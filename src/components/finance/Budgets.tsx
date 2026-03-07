@@ -73,16 +73,30 @@ export function Budgets() {
         const response = await fetch(`/api/budgets/${editingBudget}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(formData)
+          body: JSON.stringify({
+            ...formData,
+            amount: parseFloat(formData.amount)
+          })
         })
+        if (!response.ok) {
+          const errorData = await response.json()
+          throw new Error(errorData.error || 'Failed to update budget')
+        }
         const data = await response.json()
         updateBudget(editingBudget, data)
       } else {
         const response = await fetch('/api/budgets', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(formData)
+          body: JSON.stringify({
+            ...formData,
+            amount: parseFloat(formData.amount)
+          })
         })
+        if (!response.ok) {
+          const errorData = await response.json()
+          throw new Error(errorData.error || 'Failed to save budget')
+        }
         const data = await response.json()
         addBudget(data)
       }
