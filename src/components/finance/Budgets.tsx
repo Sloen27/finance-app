@@ -79,12 +79,22 @@ export function Budgets() {
           })
         })
         if (!response.ok) {
-          const errorData = await response.json()
+          let errorData
+          try {
+            errorData = await response.json()
+          } catch {
+            errorData = { error: `HTTP ${response.status}: ${response.statusText}` }
+          }
           throw new Error(errorData.error || 'Failed to update budget')
         }
         const data = await response.json()
         updateBudget(editingBudget, data)
       } else {
+        console.log('Sending budget data:', {
+          ...formData,
+          amount: parseFloat(formData.amount)
+        })
+        
         const response = await fetch('/api/budgets', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -93,8 +103,18 @@ export function Budgets() {
             amount: parseFloat(formData.amount)
           })
         })
+        
+        console.log('Response status:', response.status)
+        
         if (!response.ok) {
-          const errorData = await response.json()
+          let errorData
+          try {
+            errorData = await response.json()
+            console.error('Server error details:', errorData)
+          } catch (parseError) {
+            console.error('Failed to parse error response:', parseError)
+            errorData = { error: `HTTP ${response.status}: ${response.statusText}` }
+          }
           throw new Error(errorData.error || 'Failed to save budget')
         }
         const data = await response.json()
@@ -106,6 +126,7 @@ export function Budgets() {
       setFormData({ categoryId: '', amount: '', currency: 'RUB', month: currentMonth })
     } catch (error) {
       console.error('Error saving budget:', error)
+      alert(`Ошибка сохранения бюджета: ${error instanceof Error ? error.message : String(error)}`)
     }
   }
   

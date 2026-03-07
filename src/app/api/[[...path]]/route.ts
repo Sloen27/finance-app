@@ -84,47 +84,57 @@ export async function DELETE(request: NextRequest) {
 }
 
 async function handleRequest(request: NextRequest, method: string) {
-  const segments = getPathSegments(request)
+  let segments: string[] = []
+  try {
+    segments = getPathSegments(request)
+  } catch (urlError) {
+    console.error('Failed to parse URL:', urlError)
+    return NextResponse.json({ error: 'Invalid URL' }, { status: 400 })
+  }
+
   const [resource, id, subResource] = segments
+  console.log(`API Request: ${method} ${resource}/${id || ''}${subResource ? '/' + subResource : ''}`)
 
   try {
     switch (resource) {
       case 'categories':
-        return handleCategories(method, id, request)
+        return await handleCategories(method, id, request)
       case 'transactions':
-        return handleTransactions(method, id, request)
+        return await handleTransactions(method, id, request)
       case 'accounts':
-        return handleAccounts(method, id, subResource, request)
+        return await handleAccounts(method, id, subResource, request)
       case 'budgets':
-        return handleBudgets(method, id, request)
+        return await handleBudgets(method, id, request)
       case 'goals':
-        return handleGoals(method, id, request)
+        return await handleGoals(method, id, request)
       case 'investments':
-        return handleInvestments(method, id, request)
+        return await handleInvestments(method, id, request)
       case 'regular-payments':
-        return handleRegularPayments(method, id, request)
+        return await handleRegularPayments(method, id, request)
       case 'settings':
-        return handleSettings(method, request)
+        return await handleSettings(method, request)
       case 'init':
-        return handleInit(method, request)
+        return await handleInit(method, request)
       case 'analytics':
-        return handleAnalytics(method, request)
+        return await handleAnalytics(method, request)
       case 'export':
-        return handleExport(method, request)
+        return await handleExport(method, request)
       case 'income':
-        return handleIncome(method, request)
+        return await handleIncome(method, request)
       case 'budget-stats':
-        return handleBudgetStats(method, request)
+        return await handleBudgetStats(method, request)
       case 'auth':
-        return handleAuth(method, id, request)
+        return await handleAuth(method, id, request)
       default:
-        return NextResponse.json({ error: 'Not found' }, { status: 404 })
+        return NextResponse.json({ error: 'Not found', resource }, { status: 404 })
     }
   } catch (error) {
     console.error('API Error:', error)
-    return NextResponse.json({ 
-      error: 'Internal server error', 
-      details: error instanceof Error ? error.message : 'Unknown' 
+    return NextResponse.json({
+      error: 'Internal server error',
+      details: error instanceof Error ? error.message : 'Unknown error',
+      resource,
+      method
     }, { status: 500 })
   }
 }
@@ -270,41 +280,58 @@ async function handleAccounts(method: string, id: string | undefined, subResourc
 
 // === BUDGETS ===
 async function handleBudgets(method: string, id: string | undefined, request: NextRequest) {
-  const { searchParams } = new URL(request.url)
+  try {
+    const { searchParams } = new URL(request.url)
 
-  if (method === 'GET') {
-    const month = searchParams.get('month')
-    const where = month ? { month } : {}
-    const budgets = await db.budget.findMany({
-      where,
-      include: { category: true },
-      orderBy: { category: { name: 'asc' } }
-    })
-    return NextResponse.json(budgets)
-  }
+    if (method === 'GET') {
+      const month = searchParams.get('month')
+      const where = month ? { month } : {}
+      const budgets = await db.budget.findMany({
+        where,
+        include: { category: true },
+        orderBy: { category: { name: 'asc' } }
+      })
+      return NextResponse.json(budgets)
+    }
 
-  if (method === 'POST') {
-    try {
-      const body = await request.json()
-      let { categoryId, amount, month = getCurrentMonth() } = body
+    if (method === 'POST') {
+      let body
+      try {
+        body = await request.json()
+      } catch (parseError) {
+        console.error('Failed to parse request body:', parseError)
+        return NextResponse.json({ error: 'Invalid JSON in request body' }, { status: 400 })
+      }
+
+      console.log('Budget POST body:', JSON.stringify(body))
+
+      let { categoryId, amount, month = getCurrentMonth(), currency = 'RUB' } = body
 
       if (!categoryId) {
         return NextResponse.json({ error: 'categoryId is required' }, { status: 400 })
       }
-      
+
       // Convert amount to number if it's a string
       if (typeof amount === 'string') {
         amount = parseFloat(amount)
       }
-      
+
       if (typeof amount !== 'number' || isNaN(amount) || amount < 0) {
-        return NextResponse.json({ error: 'Invalid amount' }, { status: 400 })
+        return NextResponse.json({ error: 'Invalid amount', received: amount }, { status: 400 })
       }
 
-      // Try to find existing budget first
+      // Verify category exists
+      const category = await db.category.findUnique({ where: { id: categoryId } })
+      if (!category) {
+        return NextResponse.json({ error: 'Category not found', categoryId }, { status: 404 })
+      }
+
+      // Try to find existing budget first using the unique constraint
       const existing = await db.budget.findFirst({
         where: { categoryId, month }
       })
+
+      console.log('Existing budget:', existing ? existing.id : 'none')
 
       let budget
       if (existing) {
@@ -313,35 +340,48 @@ async function handleBudgets(method: string, id: string | undefined, request: Ne
           data: { amount },
           include: { category: true }
         })
+        console.log('Updated budget:', budget.id)
       } else {
         budget = await db.budget.create({
-          data: { categoryId, amount, month },
+          data: { categoryId, amount, month, currency },
           include: { category: true }
         })
+        console.log('Created budget:', budget.id)
       }
 
       return NextResponse.json(budget)
-    } catch (error) {
-      console.error('Budget POST error:', error)
-      return NextResponse.json({
-        error: 'Failed to save budget',
-        details: error instanceof Error ? error.message : 'Unknown error'
-      }, { status: 500 })
     }
-  }
 
-  if (method === 'PUT' && id) {
-    const body = await request.json()
-    const budget = await db.budget.update({ where: { id }, data: body, include: { category: true } })
-    return NextResponse.json(budget)
-  }
+    if (method === 'PUT' && id) {
+      let body
+      try {
+        body = await request.json()
+      } catch (parseError) {
+        return NextResponse.json({ error: 'Invalid JSON in request body' }, { status: 400 })
+      }
 
-  if (method === 'DELETE' && id) {
-    await db.budget.delete({ where: { id } })
-    return NextResponse.json({ success: true })
-  }
+      const budget = await db.budget.update({
+        where: { id },
+        data: body,
+        include: { category: true }
+      })
+      return NextResponse.json(budget)
+    }
 
-  return NextResponse.json({ error: 'Method not allowed' }, { status: 405 })
+    if (method === 'DELETE' && id) {
+      await db.budget.delete({ where: { id } })
+      return NextResponse.json({ success: true })
+    }
+
+    return NextResponse.json({ error: 'Method not allowed' }, { status: 405 })
+  } catch (error) {
+    console.error('Budget handler error:', error)
+    return NextResponse.json({
+      error: 'Failed to process budget request',
+      details: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined
+    }, { status: 500 })
+  }
 }
 
 // === GOALS ===
