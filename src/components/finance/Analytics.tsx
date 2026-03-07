@@ -42,6 +42,18 @@ export function Analytics() {
 
   const safeTransactions = Array.isArray(transactions) ? transactions : []
 
+  // Helper to safely parse date
+  const safeParseDate = (dateValue: any): Date | null => {
+    if (!dateValue) return null
+    try {
+      const date = new Date(dateValue)
+      if (isNaN(date.getTime())) return null
+      return date
+    } catch {
+      return null
+    }
+  }
+
   // Generate month options (last 12 months)
   const monthOptions = Array.from({ length: 12 }, (_, i) => {
     const date = subMonths(new Date(), i)
@@ -106,12 +118,8 @@ export function Analytics() {
     const monthStr = format(date, 'yyyy-MM')
 
     const monthTransactions = safeTransactions.filter(t => {
-      try {
-        const tDate = new Date(t.date)
-        return format(tDate, 'yyyy-MM') === monthStr
-      } catch {
-        return false
-      }
+      const tDate = safeParseDate(t.date)
+      return tDate && format(tDate, 'yyyy-MM') === monthStr
     })
 
     const income = monthTransactions

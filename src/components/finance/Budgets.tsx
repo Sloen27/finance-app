@@ -38,12 +38,24 @@ export function Budgets() {
   const [year, month] = currentMonth.split('-').map(Number)
   const monthStart = new Date(year, month - 1, 1)
   const monthEnd = new Date(year, month, 0)
+
+  // Helper to safely parse date
+  const safeParseDate = (dateValue: any): Date | null => {
+    if (!dateValue) return null
+    try {
+      const date = new Date(dateValue)
+      if (isNaN(date.getTime())) return null
+      return date
+    } catch {
+      return null
+    }
+  }
   
   const budgetsWithSpent = monthBudgets.map(budget => {
     const spent = transactions
       .filter(t => {
-        const date = new Date(t.date)
-        return t.type === 'expense' && 
+        const date = safeParseDate(t.date)
+        return date && t.type === 'expense' && 
                t.categoryId === budget.categoryId &&
                date >= monthStart && date <= monthEnd
       })

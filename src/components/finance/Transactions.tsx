@@ -56,9 +56,23 @@ export function Transactions() {
   const [filterCategory, setFilterCategory] = useState<string>('all')
   const [filterCurrency, setFilterCurrency] = useState<string>('all')
 
+  // Helper to safely parse date
+  const safeParseDate = (dateValue: any): Date | null => {
+    if (!dateValue) return null
+    try {
+      const date = new Date(dateValue)
+      if (isNaN(date.getTime())) return null
+      return date
+    } catch {
+      return null
+    }
+  }
+
   // Filter transactions
   const filteredTransactions = transactions.filter(t => {
-    const transactionMonth = format(new Date(t.date), 'yyyy-MM')
+    const tDate = safeParseDate(t.date)
+    if (!tDate) return false
+    const transactionMonth = format(tDate, 'yyyy-MM')
     if (transactionMonth !== currentMonth) return false
     if (filterType !== 'all' && t.type !== filterType) return false
     if (filterCategory !== 'all' && t.categoryId !== filterCategory) return false
@@ -66,8 +80,10 @@ export function Transactions() {
     return true
   }).sort((a, b) => {
     let comparison = 0
+    const dateA = safeParseDate(a.date)
+    const dateB = safeParseDate(b.date)
     if (sortField === 'date') {
-      comparison = new Date(a.date).getTime() - new Date(b.date).getTime()
+      comparison = (dateA?.getTime() || 0) - (dateB?.getTime() || 0)
     } else if (sortField === 'amount') {
       comparison = a.amount - b.amount
     }
@@ -106,13 +122,14 @@ export function Transactions() {
   }
 
   const handleEdit = (transaction: typeof transactions[0]) => {
+    const tDate = safeParseDate(transaction.date)
     setEditingTransaction(transaction.id)
     setFormData({
       type: transaction.type,
       amount: transaction.amount.toString(),
       currency: transaction.currency,
       categoryId: transaction.categoryId,
-      date: format(new Date(transaction.date), 'yyyy-MM-dd'),
+      date: tDate ? format(tDate, 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd'),
       comment: transaction.comment || ''
     })
     setIsDialogOpen(true)
@@ -143,7 +160,10 @@ export function Transactions() {
   const days = eachDayOfInterval({ start: monthStart, end: monthEnd })
 
   const getDayTransactions = (date: Date) => {
-    return transactions.filter(t => isSameDay(new Date(t.date), date))
+    return transactions.filter(t => {
+      const tDate = safeParseDate(t.date)
+      return tDate && isSameDay(tDate, date)
+    })
   }
 
   const handleDayClick = (day: Date) => {
@@ -460,7 +480,10 @@ export function Transactions() {
                               </Badge>
                             </div>
                             <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                              <span>{format(new Date(transaction.date), 'd MMMM yyyy', { locale: ru })}</span>
+                              <span>{(() => {
+                                const tDate = safeParseDate(transaction.date)
+                                return tDate ? format(tDate, 'd MMMM yyyy', { locale: ru }) : ''
+                              })()}</span>
                               {transaction.comment && (
                                 <>
                                   <span>•</span>

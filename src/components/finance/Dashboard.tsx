@@ -27,8 +27,21 @@ export function Dashboard() {
   const safeAccounts = accounts || []
   const safeGoals = goals || []
 
+  // Helper to safely parse date
+  const safeParseDate = (dateValue: any): Date | null => {
+    if (!dateValue) return null
+    try {
+      const date = new Date(dateValue)
+      if (isNaN(date.getTime())) return null
+      return date
+    } catch {
+      return null
+    }
+  }
+
   const monthTransactions = safeTransactions.filter(t => {
-    const date = new Date(t.date)
+    const date = safeParseDate(t.date)
+    if (!date) return false
     return !isBefore(date, monthStart) && !isAfter(date, monthEnd)
   })
 
@@ -122,7 +135,10 @@ export function Dashboard() {
   const cashFlowData = Array.from({ length: 6 }, (_, i) => {
     const date = subMonths(new Date(), 5 - i)
     const monthStr = format(date, 'yyyy-MM')
-    const monthTx = safeTransactions.filter(t => format(new Date(t.date), 'yyyy-MM') === monthStr)
+    const monthTx = safeTransactions.filter(t => {
+      const tDate = safeParseDate(t.date)
+      return tDate && format(tDate, 'yyyy-MM') === monthStr
+    })
     const income = monthTx.filter(t => t.type === 'income').reduce((sum, t) => sum + (t.amount || 0), 0)
     const expense = monthTx.filter(t => t.type === 'expense').reduce((sum, t) => sum + (t.amount || 0), 0)
     return {
@@ -499,7 +515,10 @@ export function Dashboard() {
                       <div>
                         <p className="text-sm font-medium">{transaction.category?.name || 'Категория'}</p>
                         <p className="text-xs text-muted-foreground">
-                          {transaction.comment || format(new Date(transaction.date), 'd MMM', { locale: ru })}
+                          {transaction.comment || (() => {
+                            const tDate = safeParseDate(transaction.date)
+                            return tDate ? format(tDate, 'd MMM', { locale: ru }) : ''
+                          })()}
                         </p>
                       </div>
                     </div>
