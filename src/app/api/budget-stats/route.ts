@@ -2,9 +2,67 @@ import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { startOfMonth, endOfMonth, subMonths, format } from 'date-fns'
 
+// Ensure tables exist
+async function ensureTables() {
+  // Ensure MonthlyIncome table
+  try {
+    await db.$queryRaw`SELECT 1 FROM "MonthlyIncome" LIMIT 1`
+  } catch {
+    try {
+      await db.$executeRaw`
+        CREATE TABLE IF NOT EXISTS "MonthlyIncome" (
+          "id" TEXT NOT NULL,
+          "amount" DOUBLE PRECISION NOT NULL,
+          "currency" TEXT NOT NULL DEFAULT 'RUB',
+          "month" TEXT NOT NULL,
+          "source" TEXT,
+          "isRecurring" BOOLEAN NOT NULL DEFAULT true,
+          "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          "updatedAt" TIMESTAMP(3) NOT NULL,
+          CONSTRAINT "MonthlyIncome_pkey" PRIMARY KEY ("id")
+        )
+      `
+      await db.$executeRaw`CREATE UNIQUE INDEX IF NOT EXISTS "MonthlyIncome_month_key" ON "MonthlyIncome"("month")`
+      await db.$executeRaw`CREATE INDEX IF NOT EXISTS "MonthlyIncome_month_idx" ON "MonthlyIncome"("month")`
+    } catch (e) {
+      console.error('Error creating MonthlyIncome table:', e)
+    }
+  }
+
+  // Ensure MonthlyBudgetStats table
+  try {
+    await db.$queryRaw`SELECT 1 FROM "MonthlyBudgetStats" LIMIT 1`
+  } catch {
+    try {
+      await db.$executeRaw`
+        CREATE TABLE IF NOT EXISTS "MonthlyBudgetStats" (
+          "id" TEXT NOT NULL,
+          "month" TEXT NOT NULL,
+          "plannedIncome" DOUBLE PRECISION NOT NULL DEFAULT 0,
+          "mandatoryBudgetTotal" DOUBLE PRECISION NOT NULL DEFAULT 0,
+          "mandatorySpent" DOUBLE PRECISION NOT NULL DEFAULT 0,
+          "mandatoryOverspent" DOUBLE PRECISION NOT NULL DEFAULT 0,
+          "otherExpenses" DOUBLE PRECISION NOT NULL DEFAULT 0,
+          "remainingBudget" DOUBLE PRECISION NOT NULL DEFAULT 0,
+          "actualRemaining" DOUBLE PRECISION NOT NULL DEFAULT 0,
+          "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          "updatedAt" TIMESTAMP(3) NOT NULL,
+          CONSTRAINT "MonthlyBudgetStats_pkey" PRIMARY KEY ("id")
+        )
+      `
+      await db.$executeRaw`CREATE UNIQUE INDEX IF NOT EXISTS "MonthlyBudgetStats_month_key" ON "MonthlyBudgetStats"("month")`
+      await db.$executeRaw`CREATE INDEX IF NOT EXISTS "MonthlyBudgetStats_month_idx" ON "MonthlyBudgetStats"("month")`
+    } catch (e) {
+      console.error('Error creating MonthlyBudgetStats table:', e)
+    }
+  }
+}
+
 // GET - Get budget stats for current or specified month
 export async function GET(request: Request) {
   try {
+    await ensureTables()
+
     const { searchParams } = new URL(request.url)
     const month = searchParams.get('month') || getCurrentMonth()
 
@@ -23,24 +81,14 @@ export async function GET(request: Request) {
       })
     } else {
       budgetStats = await db.monthlyBudgetStats.create({
-        data: {
-          month,
-          ...calculatedStats
-        }
+        data: { month, ...calculatedStats }
       })
     }
 
     // Get mandatory categories with their budgets
     const mandatoryCategories = await db.category.findMany({
-      where: {
-        type: 'expense',
-        expenseType: 'mandatory'
-      },
-      include: {
-        budgets: {
-          where: { month }
-        }
-      }
+      where: { type: 'expense', expenseType: 'mandatory' },
+      include: { budgets: { where: { month } } }
     })
 
     // Calculate per-category spending
@@ -54,10 +102,7 @@ export async function GET(request: Request) {
           where: {
             categoryId: cat.id,
             type: 'expense',
-            date: {
-              gte: monthStart,
-              lte: monthEnd
-            }
+            date: { gte: monthStart, lte: monthEnd }
           },
           _sum: { amount: true }
         })
@@ -78,7 +123,6 @@ export async function GET(request: Request) {
       })
     )
 
-    // Get average mandatory expenses for last 3 months (for cushion calculation)
     const avgMandatoryExpenses = await calculateAverageMandatoryExpenses(3)
 
     return NextResponse.json({
@@ -100,12 +144,8 @@ async function calculateBudgetStats(month: string) {
   const monthStart = startOfMonth(new Date(year, monthNum - 1))
   const monthEnd = endOfMonth(new Date(year, monthNum - 1))
 
-  // Get monthly income
-  let income = await db.monthlyIncome.findUnique({
-    where: { month }
-  })
+  let income = await db.monthlyIncome.findUnique({ where: { month } })
 
-  // If no income for this month, get the latest recurring
   if (!income) {
     const lastRecurring = await db.monthlyIncome.findFirst({
       where: { isRecurring: true },
@@ -116,53 +156,29 @@ async function calculateBudgetStats(month: string) {
 
   const plannedIncome = income?.amount || 0
 
-  // Get mandatory categories
   const mandatoryCategories = await db.category.findMany({
-    where: {
-      type: 'expense',
-      expenseType: 'mandatory'
-    },
-    include: {
-      budgets: {
-        where: { month }
-      }
-    }
+    where: { type: 'expense', expenseType: 'mandatory' },
+    include: { budgets: { where: { month } } }
   })
 
-  // Calculate total mandatory budget
   const mandatoryBudgetTotal = mandatoryCategories.reduce(
-    (sum, cat) => sum + (cat.budgets[0]?.amount || 0),
-    0
+    (sum, cat) => sum + (cat.budgets[0]?.amount || 0), 0
   )
 
-  // Get transactions for the month
   const transactions = await db.transaction.findMany({
-    where: {
-      date: {
-        gte: monthStart,
-        lte: monthEnd
-      }
-    },
-    include: {
-      category: true
-    }
+    where: { date: { gte: monthStart, lte: monthEnd } },
+    include: { category: true }
   })
 
-  // Calculate mandatory spent
   const mandatorySpent = transactions
     .filter(t => t.type === 'expense' && t.category?.expenseType === 'mandatory')
     .reduce((sum, t) => sum + t.amount, 0)
 
-  // Calculate mandatory overspent (amount over budget)
   const mandatoryOverspent = Math.max(0, mandatorySpent - mandatoryBudgetTotal)
-
-  // Calculate other expenses (non-mandatory)
   const otherExpenses = transactions
     .filter(t => t.type === 'expense' && t.category?.expenseType !== 'mandatory')
     .reduce((sum, t) => sum + t.amount, 0)
 
-  // Calculate actual remaining
-  // Income - mandatory budget (planned) - overspent on mandatory - other expenses
   const remainingBudget = plannedIncome - mandatoryBudgetTotal
   const actualRemaining = remainingBudget - mandatoryOverspent - otherExpenses
 
@@ -190,13 +206,8 @@ async function calculateAverageMandatoryExpenses(months: number): Promise<number
     const spent = await db.transaction.aggregate({
       where: {
         type: 'expense',
-        category: {
-          expenseType: 'mandatory'
-        },
-        date: {
-          gte: monthStart,
-          lte: monthEnd
-        }
+        category: { expenseType: 'mandatory' },
+        date: { gte: monthStart, lte: monthEnd }
       },
       _sum: { amount: true }
     })
@@ -204,8 +215,7 @@ async function calculateAverageMandatoryExpenses(months: number): Promise<number
     results.push(spent._sum.amount || 0)
   }
 
-  const total = results.reduce((sum, val) => sum + val, 0)
-  return total / months
+  return results.reduce((sum, val) => sum + val, 0) / months
 }
 
 function getCurrentMonth() {

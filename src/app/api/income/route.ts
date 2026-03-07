@@ -1,9 +1,40 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 
+// Ensure MonthlyIncome table exists
+async function ensureTable() {
+  try {
+    // Check if table exists by trying to query it
+    await db.$queryRaw`SELECT 1 FROM "MonthlyIncome" LIMIT 1`
+  } catch {
+    // Table doesn't exist, create it
+    try {
+      await db.$executeRaw`
+        CREATE TABLE IF NOT EXISTS "MonthlyIncome" (
+          "id" TEXT NOT NULL,
+          "amount" DOUBLE PRECISION NOT NULL,
+          "currency" TEXT NOT NULL DEFAULT 'RUB',
+          "month" TEXT NOT NULL,
+          "source" TEXT,
+          "isRecurring" BOOLEAN NOT NULL DEFAULT true,
+          "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          "updatedAt" TIMESTAMP(3) NOT NULL,
+          CONSTRAINT "MonthlyIncome_pkey" PRIMARY KEY ("id")
+        )
+      `
+      await db.$executeRaw`CREATE UNIQUE INDEX IF NOT EXISTS "MonthlyIncome_month_key" ON "MonthlyIncome"("month")`
+      await db.$executeRaw`CREATE INDEX IF NOT EXISTS "MonthlyIncome_month_idx" ON "MonthlyIncome"("month")`
+    } catch (createError) {
+      console.error('Error creating MonthlyIncome table:', createError)
+    }
+  }
+}
+
 // GET - Get income for current or specified month
 export async function GET(request: Request) {
   try {
+    await ensureTable()
+
     const { searchParams } = new URL(request.url)
     const month = searchParams.get('month') || getCurrentMonth()
 
@@ -21,7 +52,7 @@ export async function GET(request: Request) {
       if (lastRecurring) {
         return NextResponse.json({
           ...lastRecurring,
-          id: null, // Not saved yet for this month
+          id: null,
           month,
           amount: lastRecurring.amount,
           isFromPrevious: true
@@ -39,6 +70,8 @@ export async function GET(request: Request) {
 // POST - Create or update income for a month
 export async function POST(request: Request) {
   try {
+    await ensureTable()
+
     const body = await request.json()
     const { amount, month = getCurrentMonth(), source, isRecurring = true } = body
 
@@ -55,20 +88,11 @@ export async function POST(request: Request) {
     if (existing) {
       income = await db.monthlyIncome.update({
         where: { id: existing.id },
-        data: {
-          amount,
-          source,
-          isRecurring
-        }
+        data: { amount, source, isRecurring }
       })
     } else {
       income = await db.monthlyIncome.create({
-        data: {
-          amount,
-          month,
-          source,
-          isRecurring
-        }
+        data: { amount, month, source, isRecurring }
       })
     }
 
@@ -79,7 +103,6 @@ export async function POST(request: Request) {
   }
 }
 
-// Helper function to get current month in YYYY-MM format
 function getCurrentMonth() {
   const now = new Date()
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
