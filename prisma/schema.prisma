@@ -1,0 +1,168 @@
+// This is your Prisma schema file for PostgreSQL (Vercel/Production)
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Transaction {
+  id         String   @id @default(cuid())
+  type       String   // "income" or "expense"
+  amount     Float
+  currency   String   @default("RUB")
+  categoryId String
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  accountId  String?
+  account    Account? @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  date       DateTime
+  comment    String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([categoryId])
+  @@index([accountId])
+  @@index([date])
+}
+
+model Category {
+  id              String           @id @default(cuid())
+  name            String
+  icon            String?
+  color           String?
+  isDefault       Boolean          @default(false)
+  type            String           @default("expense") // "income" or "expense"
+  expenseType     String           @default("variable") // "mandatory", "variable", "discretionary"
+  transactions    Transaction[]
+  budgets         Budget[]
+  regularPayments RegularPayment[]
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  @@index([type])
+}
+
+model Budget {
+  id         String   @id @default(cuid())
+  categoryId String
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  amount     Float
+  currency   String   @default("RUB")
+  month      String   // Format: "YYYY-MM"
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([categoryId, month])
+  @@index([categoryId])
+}
+
+model RegularPayment {
+  id         String   @id @default(cuid())
+  name       String
+  amount     Float
+  currency   String   @default("RUB")
+  categoryId String
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  period     String   // "daily", "weekly", "monthly", "yearly"
+  dueDate    Int?     // Day of month (1-31) for monthly payments
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([categoryId])
+}
+
+model Settings {
+  id                 String   @id @default(cuid())
+  rubToUsdRate       Float    @default(0.011)
+  theme              String   @default("light")
+  mandatoryPercent   Float    @default(50)
+  variablePercent    Float    @default(30)
+  savingsPercent     Float    @default(10)
+  investmentsPercent Float    @default(10)
+  passwordHash       String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+}
+
+model Account {
+  id           String          @id @default(cuid())
+  name         String
+  type         String          // "main", "savings", "cash", "investment"
+  currency     String          @default("RUB")
+  balance      Float           @default(0)
+  color        String?
+  icon         String?
+  isActive     Boolean         @default(true)
+  transactions Transaction[]
+  goals        FinancialGoal[]
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  @@index([type])
+}
+
+model FinancialGoal {
+  id            String    @id @default(cuid())
+  name          String
+  targetAmount  Float
+  currentAmount Float     @default(0)
+  currency      String    @default("RUB")
+  deadline      DateTime?
+  accountId     String?
+  account       Account?  @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  isCompleted   Boolean   @default(false)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([accountId])
+}
+
+model Investment {
+  id          String   @id @default(cuid())
+  type        String   // "deposit", "withdraw", "adjustment"
+  amount      Float
+  description String?
+  date        DateTime
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([date])
+}
+
+// Ежемесячный доход пользователя
+model MonthlyIncome {
+  id          String   @id @default(cuid())
+  amount      Float
+  currency    String   @default("RUB")
+  month       String   // Format: "YYYY-MM" - for which month this income is set
+  source      String?  // Optional: "salary", "freelance", etc.
+  isRecurring Boolean  @default(true) // Auto-repeat every month
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([month]) // One income record per month
+  @@index([month])
+}
+
+// Статистика бюджета по месяцам
+model MonthlyBudgetStats {
+  id                    String   @id @default(cuid())
+  month                 String   // Format: "YYYY-MM"
+  plannedIncome         Float    @default(0) // Запланированный доход
+  mandatoryBudgetTotal  Float    @default(0) // Сумма бюджетов обязательных категорий
+  mandatorySpent        Float    @default(0) // Потрачено по обязательным категориям
+  mandatoryOverspent    Float    @default(0) // Перерасход по обязательным (считается как обычный расход)
+  otherExpenses         Float    @default(0) // Другие расходы
+  remainingBudget       Float    @default(0) // Остаток бюджета
+  actualRemaining       Float    @default(0) // Фактический остаток с учётом всех трат
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@unique([month])
+  @@index([month])
+}

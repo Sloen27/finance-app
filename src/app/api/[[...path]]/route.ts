@@ -1,0 +1,1172 @@
+import { NextRequest, NextResponse } from 'next/server'
+import { db } from '@/lib/db'
+import { hashPassword, verifyPassword, encryptSession } from '@/lib/auth'
+import { startOfMonth, endOfMonth, subMonths, format } from 'date-fns'
+
+// Helper to extract path segments
+function getPathSegments(request: NextRequest): string[] {
+  const url = new URL(request.url)
+  const pathParts = url.pathname.replace('/api/', '').split('/').filter(Boolean)
+  return pathParts
+}
+
+// Helper to get current month
+function getCurrentMonth() {
+  const now = new Date()
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+}
+
+// Ensure required tables exist
+async function ensureTables() {
+  const tables = ['MonthlyIncome', 'MonthlyBudgetStats']
+  
+  for (const table of tables) {
+    try {
+      await db.$queryRawUnsafe(`SELECT 1 FROM "${table}" LIMIT 1`)
+    } catch {
+      try {
+        if (table === 'MonthlyIncome') {
+          await db.$executeRawUnsafe(`
+            CREATE TABLE IF NOT EXISTS "MonthlyIncome" (
+              "id" TEXT NOT NULL,
+              "amount" DOUBLE PRECISION NOT NULL,
+              "currency" TEXT NOT NULL DEFAULT 'RUB',
+              "month" TEXT NOT NULL,
+              "source" TEXT,
+              "isRecurring" BOOLEAN NOT NULL DEFAULT true,
+              "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              "updatedAt" TIMESTAMP(3) NOT NULL,
+              CONSTRAINT "MonthlyIncome_pkey" PRIMARY KEY ("id")
+            )
+          `)
+          await db.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "MonthlyIncome_month_key" ON "MonthlyIncome"("month")`)
+        } else if (table === 'MonthlyBudgetStats') {
+          await db.$executeRawUnsafe(`
+            CREATE TABLE IF NOT EXISTS "MonthlyBudgetStats" (
+              "id" TEXT NOT NULL,
+              "month" TEXT NOT NULL,
+              "plannedIncome" DOUBLE PRECISION NOT NULL DEFAULT 0,
+              "mandatoryBudgetTotal" DOUBLE PRECISION NOT NULL DEFAULT 0,
+              "mandatorySpent" DOUBLE PRECISION NOT NULL DEFAULT 0,
+              "mandatoryOverspent" DOUBLE PRECISION NOT NULL DEFAULT 0,
+              "otherExpenses" DOUBLE PRECISION NOT NULL DEFAULT 0,
+              "remainingBudget" DOUBLE PRECISION NOT NULL DEFAULT 0,
+              "actualRemaining" DOUBLE PRECISION NOT NULL DEFAULT 0,
+              "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              "updatedAt" TIMESTAMP(3) NOT NULL,
+              CONSTRAINT "MonthlyBudgetStats_pkey" PRIMARY KEY ("id")
+            )
+          `)
+          await db.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "MonthlyBudgetStats_month_key" ON "MonthlyBudgetStats"("month")`)
+        }
+      } catch (e) {
+        console.error(`Error creating ${table} table:`, e)
+      }
+    }
+  }
+}
+
+// Main handler
+export async function GET(request: NextRequest) {
+  return handleRequest(request, 'GET')
+}
+
+export async function POST(request: NextRequest) {
+  return handleRequest(request, 'POST')
+}
+
+export async function PUT(request: NextRequest) {
+  return handleRequest(request, 'PUT')
+}
+
+export async function DELETE(request: NextRequest) {
+  return handleRequest(request, 'DELETE')
+}
+
+async function handleRequest(request: NextRequest, method: string) {
+  let segments: string[] = []
+  try {
+    segments = getPathSegments(request)
+  } catch (urlError) {
+    console.error('Failed to parse URL:', urlError)
+    return NextResponse.json({ error: 'Invalid URL' }, { status: 400 })
+  }
+
+  const [resource, id, subResource] = segments
+  console.log(`API Request: ${method} ${resource}/${id || ''}${subResource ? '/' + subResource : ''}`)
+
+  try {
+    switch (resource) {
+      case 'categories':
+        return await handleCategories(method, id, request)
+      case 'transactions':
+        return await handleTransactions(method, id, request)
+      case 'accounts':
+        return await handleAccounts(method, id, subResource, request)
+      case 'budgets':
+        return await handleBudgets(method, id, request)
+      case 'goals':
+        return await handleGoals(method, id, request)
+      case 'investments':
+        return await handleInvestments(method, id, request)
+      case 'regular-payments':
+        return await handleRegularPayments(method, id, request)
+      case 'settings':
+        return await handleSettings(method, request)
+      case 'init':
+        return await handleInit(method, request)
+      case 'analytics':
+        return await handleAnalytics(method, request)
+      case 'export':
+        return await handleExport(method, request)
+      case 'income':
+        return await handleIncome(method, request)
+      case 'budget-stats':
+        return await handleBudgetStats(method, request)
+      case 'auth':
+        return await handleAuth(method, id, request)
+      default:
+        return NextResponse.json({ error: 'Not found', resource }, { status: 404 })
+    }
+  } catch (error) {
+    console.error('API Error:', error)
+    return NextResponse.json({
+      error: 'Internal server error',
+      details: error instanceof Error ? error.message : 'Unknown error',
+      resource,
+      method
+    }, { status: 500 })
+  }
+}
+
+// === CATEGORIES ===
+async function handleCategories(method: string, id: string | undefined, request: NextRequest) {
+  const { searchParams } = new URL(request.url)
+  
+  if (method === 'GET') {
+    const type = searchParams.get('type')
+    const where = type ? { type } : {}
+    const categories = await db.category.findMany({ where, orderBy: { name: 'asc' } })
+    return NextResponse.json(categories)
+  }
+  
+  if (method === 'POST') {
+    const body = await request.json()
+    const category = await db.category.create({ data: body })
+    return NextResponse.json(category)
+  }
+  
+  if (method === 'PUT' && id) {
+    const body = await request.json()
+    const category = await db.category.update({ where: { id }, data: body })
+    return NextResponse.json(category)
+  }
+  
+  if (method === 'DELETE' && id) {
+    await db.category.delete({ where: { id } })
+    return NextResponse.json({ success: true })
+  }
+  
+  return NextResponse.json({ error: 'Method not allowed' }, { status: 405 })
+}
+
+// === TRANSACTIONS ===
+async function handleTransactions(method: string, id: string | undefined, request: NextRequest) {
+  try {
+    const { searchParams } = new URL(request.url)
+
+    if (method === 'GET') {
+      const month = searchParams.get('month')
+      if (month) {
+        const [year, monthNum] = month.split('-').map(Number)
+        const startDate = new Date(year, monthNum - 1, 1)
+        const endDate = new Date(year, monthNum, 0, 23, 59, 59)
+        const transactions = await db.transaction.findMany({
+          where: { date: { gte: startDate, lte: endDate } },
+          include: { category: true, account: true },
+          orderBy: { date: 'desc' }
+        })
+        return NextResponse.json(transactions)
+      }
+      const transactions = await db.transaction.findMany({
+        include: { category: true, account: true },
+        orderBy: { date: 'desc' }
+      })
+      return NextResponse.json(transactions)
+    }
+
+    if (method === 'POST') {
+      let body
+      try {
+        body = await request.json()
+      } catch (parseError) {
+        console.error('Failed to parse request body:', parseError)
+        return NextResponse.json({ error: 'Invalid JSON in request body' }, { status: 400 })
+      }
+
+      console.log('Transaction POST body:', JSON.stringify(body))
+
+      const { type, amount, categoryId, date, currency = 'RUB', comment, accountId } = body
+
+      // Validate required fields
+      if (!categoryId) {
+        return NextResponse.json({ error: 'categoryId is required' }, { status: 400 })
+      }
+
+      if (!date) {
+        return NextResponse.json({ error: 'date is required' }, { status: 400 })
+      }
+
+      // Parse and validate amount
+      let parsedAmount = typeof amount === 'string' ? parseFloat(amount) : amount
+      if (typeof parsedAmount !== 'number' || isNaN(parsedAmount)) {
+        return NextResponse.json({ error: 'Invalid amount', received: amount }, { status: 400 })
+      }
+
+      // Parse date
+      const parsedDate = new Date(date)
+      if (isNaN(parsedDate.getTime())) {
+        return NextResponse.json({ error: 'Invalid date format', received: date }, { status: 400 })
+      }
+
+      // Verify category exists
+      const category = await db.category.findUnique({ where: { id: categoryId } })
+      if (!category) {
+        return NextResponse.json({ error: 'Category not found', categoryId }, { status: 404 })
+      }
+
+      // Create transaction
+      const transaction = await db.transaction.create({
+        data: {
+          type: type || 'expense',
+          amount: parsedAmount,
+          currency,
+          categoryId,
+          date: parsedDate,
+          comment: comment || null,
+          accountId: accountId || null
+        },
+        include: { category: true, account: true }
+      })
+
+      console.log('Created transaction:', transaction.id)
+      return NextResponse.json(transaction)
+    }
+
+    if (method === 'PUT' && id) {
+      let body
+      try {
+        body = await request.json()
+      } catch (parseError) {
+        return NextResponse.json({ error: 'Invalid JSON in request body' }, { status: 400 })
+      }
+
+      const updateData: any = { ...body }
+      if (body.date) {
+        updateData.date = new Date(body.date)
+        if (isNaN(updateData.date.getTime())) {
+          return NextResponse.json({ error: 'Invalid date format' }, { status: 400 })
+        }
+      }
+      if (body.amount !== undefined) {
+        updateData.amount = typeof body.amount === 'string' ? parseFloat(body.amount) : body.amount
+      }
+
+      const transaction = await db.transaction.update({
+        where: { id },
+        data: updateData,
+        include: { category: true, account: true }
+      })
+      return NextResponse.json(transaction)
+    }
+
+    if (method === 'DELETE' && id) {
+      await db.transaction.delete({ where: { id } })
+      return NextResponse.json({ success: true })
+    }
+
+    return NextResponse.json({ error: 'Method not allowed' }, { status: 405 })
+  } catch (error) {
+    console.error('Transaction handler error:', error)
+    return NextResponse.json({
+      error: 'Failed to process transaction request',
+      details: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined
+    }, { status: 500 })
+  }
+}
+
+// === ACCOUNTS ===
+async function handleAccounts(method: string, id: string | undefined, subResource: string | undefined, request: NextRequest) {
+  if (subResource === 'transfer' && method === 'POST') {
+    const body = await request.json()
+    const { fromAccountId, toAccountId, amount } = body
+    
+    const fromAccount = await db.account.findUnique({ where: { id: fromAccountId } })
+    const toAccount = await db.account.findUnique({ where: { id: toAccountId } })
+    
+    if (!fromAccount || !toAccount) {
+      return NextResponse.json({ error: 'Account not found' }, { status: 404 })
+    }
+    
+    await db.account.update({ where: { id: fromAccountId }, data: { balance: fromAccount.balance - amount } })
+    await db.account.update({ where: { id: toAccountId }, data: { balance: toAccount.balance + amount } })
+    
+    return NextResponse.json({ success: true })
+  }
+  
+  if (id && subResource === 'history') {
+    try {
+      const history = await db.$queryRawUnsafe(`SELECT * FROM "BalanceHistory" WHERE "accountId" = '${id}' ORDER BY date DESC`)
+      return NextResponse.json(history)
+    } catch {
+      return NextResponse.json([])
+    }
+  }
+  
+  if (method === 'GET') {
+    if (id) {
+      const account = await db.account.findUnique({ where: { id } })
+      return NextResponse.json(account)
+    }
+    const accounts = await db.account.findMany({ orderBy: { name: 'asc' } })
+    return NextResponse.json(accounts)
+  }
+  
+  if (method === 'POST') {
+    const body = await request.json()
+    const account = await db.account.create({ data: body })
+    return NextResponse.json(account)
+  }
+  
+  if (method === 'PUT' && id) {
+    const body = await request.json()
+    const account = await db.account.update({ where: { id }, data: body })
+    return NextResponse.json(account)
+  }
+  
+  if (method === 'DELETE' && id) {
+    await db.account.delete({ where: { id } })
+    return NextResponse.json({ success: true })
+  }
+  
+  return NextResponse.json({ error: 'Method not allowed' }, { status: 405 })
+}
+
+// === BUDGETS ===
+async function handleBudgets(method: string, id: string | undefined, request: NextRequest) {
+  try {
+    const { searchParams } = new URL(request.url)
+
+    if (method === 'GET') {
+      const month = searchParams.get('month')
+      const where = month ? { month } : {}
+      const budgets = await db.budget.findMany({
+        where,
+        include: { category: true },
+        orderBy: { category: { name: 'asc' } }
+      })
+      return NextResponse.json(budgets)
+    }
+
+    if (method === 'POST') {
+      let body
+      try {
+        body = await request.json()
+      } catch (parseError) {
+        console.error('Failed to parse request body:', parseError)
+        return NextResponse.json({ error: 'Invalid JSON in request body' }, { status: 400 })
+      }
+
+      console.log('Budget POST body:', JSON.stringify(body))
+
+      let { categoryId, amount, month = getCurrentMonth(), currency = 'RUB' } = body
+
+      if (!categoryId) {
+        return NextResponse.json({ error: 'categoryId is required' }, { status: 400 })
+      }
+
+      // Convert amount to number if it's a string
+      if (typeof amount === 'string') {
+        amount = parseFloat(amount)
+      }
+
+      if (typeof amount !== 'number' || isNaN(amount) || amount < 0) {
+        return NextResponse.json({ error: 'Invalid amount', received: amount }, { status: 400 })
+      }
+
+      // Verify category exists
+      const category = await db.category.findUnique({ where: { id: categoryId } })
+      if (!category) {
+        return NextResponse.json({ error: 'Category not found', categoryId }, { status: 404 })
+      }
+
+      // Try to find existing budget first using the unique constraint
+      const existing = await db.budget.findFirst({
+        where: { categoryId, month }
+      })
+
+      console.log('Existing budget:', existing ? existing.id : 'none')
+
+      let budget
+      if (existing) {
+        budget = await db.budget.update({
+          where: { id: existing.id },
+          data: { amount },
+          include: { category: true }
+        })
+        console.log('Updated budget:', budget.id)
+      } else {
+        budget = await db.budget.create({
+          data: { categoryId, amount, month, currency },
+          include: { category: true }
+        })
+        console.log('Created budget:', budget.id)
+      }
+
+      return NextResponse.json(budget)
+    }
+
+    if (method === 'PUT' && id) {
+      let body
+      try {
+        body = await request.json()
+      } catch (parseError) {
+        return NextResponse.json({ error: 'Invalid JSON in request body' }, { status: 400 })
+      }
+
+      const budget = await db.budget.update({
+        where: { id },
+        data: body,
+        include: { category: true }
+      })
+      return NextResponse.json(budget)
+    }
+
+    if (method === 'DELETE' && id) {
+      await db.budget.delete({ where: { id } })
+      return NextResponse.json({ success: true })
+    }
+
+    return NextResponse.json({ error: 'Method not allowed' }, { status: 405 })
+  } catch (error) {
+    console.error('Budget handler error:', error)
+    return NextResponse.json({
+      error: 'Failed to process budget request',
+      details: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined
+    }, { status: 500 })
+  }
+}
+
+// === GOALS ===
+async function handleGoals(method: string, id: string | undefined, request: NextRequest) {
+  if (method === 'GET') {
+    if (id) {
+      const goal = await db.financialGoal.findUnique({ where: { id }, include: { account: true } })
+      return NextResponse.json(goal)
+    }
+    const goals = await db.financialGoal.findMany({ include: { account: true }, orderBy: { createdAt: 'desc' } })
+    return NextResponse.json(goals)
+  }
+  
+  if (method === 'POST') {
+    const body = await request.json()
+    const goal = await db.financialGoal.create({ data: body, include: { account: true } })
+    return NextResponse.json(goal)
+  }
+  
+  if (method === 'PUT' && id) {
+    const body = await request.json()
+    const goal = await db.financialGoal.update({ where: { id }, data: body, include: { account: true } })
+    return NextResponse.json(goal)
+  }
+  
+  if (method === 'DELETE' && id) {
+    await db.financialGoal.delete({ where: { id } })
+    return NextResponse.json({ success: true })
+  }
+  
+  return NextResponse.json({ error: 'Method not allowed' }, { status: 405 })
+}
+
+// === INVESTMENTS ===
+async function handleInvestments(method: string, id: string | undefined, request: NextRequest) {
+  if (method === 'GET') {
+    const investments = await db.investment.findMany({ orderBy: { date: 'desc' } })
+    return NextResponse.json(investments)
+  }
+  
+  if (method === 'POST') {
+    const body = await request.json()
+    const investment = await db.investment.create({ data: { ...body, date: new Date(body.date) } })
+    return NextResponse.json(investment)
+  }
+  
+  if (method === 'DELETE' && id) {
+    await db.investment.delete({ where: { id } })
+    return NextResponse.json({ success: true })
+  }
+  
+  return NextResponse.json({ error: 'Method not allowed' }, { status: 405 })
+}
+
+// === REGULAR PAYMENTS ===
+async function handleRegularPayments(method: string, id: string | undefined, request: NextRequest) {
+  try {
+    if (method === 'GET') {
+      if (id) {
+        const payment = await db.regularPayment.findUnique({ where: { id }, include: { category: true } })
+        return NextResponse.json(payment)
+      }
+      const payments = await db.regularPayment.findMany({ include: { category: true }, orderBy: { name: 'asc' } })
+      return NextResponse.json(payments)
+    }
+
+    if (method === 'POST') {
+      let body
+      try {
+        body = await request.json()
+      } catch (parseError) {
+        return NextResponse.json({ error: 'Invalid JSON in request body' }, { status: 400 })
+      }
+
+      console.log('RegularPayment POST body:', JSON.stringify(body))
+
+      const { name, amount, categoryId, period, dueDate, isActive = true, currency = 'RUB' } = body
+
+      // Validate required fields
+      if (!name || typeof name !== 'string') {
+        return NextResponse.json({ error: 'name is required and must be a string' }, { status: 400 })
+      }
+
+      if (!categoryId) {
+        return NextResponse.json({ error: 'categoryId is required' }, { status: 400 })
+      }
+
+      // Validate amount
+      let parsedAmount = typeof amount === 'string' ? parseFloat(amount) : amount
+      if (typeof parsedAmount !== 'number' || isNaN(parsedAmount)) {
+        return NextResponse.json({ error: 'Invalid amount' }, { status: 400 })
+      }
+
+      // Validate category exists
+      const category = await db.category.findUnique({ where: { id: categoryId } })
+      if (!category) {
+        return NextResponse.json({ error: 'Category not found', categoryId }, { status: 404 })
+      }
+
+      // Validate period
+      const validPeriods = ['daily', 'weekly', 'monthly', 'yearly']
+      if (!period || !validPeriods.includes(period)) {
+        return NextResponse.json({ error: 'Invalid period. Must be one of: ' + validPeriods.join(', ') }, { status: 400 })
+      }
+
+      const payment = await db.regularPayment.create({
+        data: {
+          name,
+          amount: parsedAmount,
+          currency,
+          categoryId,
+          period,
+          dueDate: dueDate ? parseInt(dueDate) : null,
+          isActive
+        },
+        include: { category: true }
+      })
+
+      console.log('Created regular payment:', payment.id)
+      return NextResponse.json(payment)
+    }
+
+    if (method === 'PUT' && id) {
+      let body
+      try {
+        body = await request.json()
+      } catch (parseError) {
+        return NextResponse.json({ error: 'Invalid JSON in request body' }, { status: 400 })
+      }
+
+      const updateData: any = {}
+
+      if (body.name !== undefined) updateData.name = body.name
+      if (body.amount !== undefined) {
+        updateData.amount = typeof body.amount === 'string' ? parseFloat(body.amount) : body.amount
+      }
+      if (body.currency !== undefined) updateData.currency = body.currency
+      if (body.categoryId !== undefined) updateData.categoryId = body.categoryId
+      if (body.period !== undefined) updateData.period = body.period
+      if (body.dueDate !== undefined) updateData.dueDate = body.dueDate ? parseInt(body.dueDate) : null
+      if (body.isActive !== undefined) updateData.isActive = body.isActive
+
+      const payment = await db.regularPayment.update({
+        where: { id },
+        data: updateData,
+        include: { category: true }
+      })
+      return NextResponse.json(payment)
+    }
+
+    if (method === 'DELETE' && id) {
+      await db.regularPayment.delete({ where: { id } })
+      return NextResponse.json({ success: true })
+    }
+
+    return NextResponse.json({ error: 'Method not allowed' }, { status: 405 })
+  } catch (error) {
+    console.error('RegularPayment handler error:', error)
+    return NextResponse.json({
+      error: 'Failed to process regular payment request',
+      details: error instanceof Error ? error.message : String(error)
+    }, { status: 500 })
+  }
+}
+
+// === SETTINGS ===
+async function handleSettings(method: string, request: NextRequest) {
+  if (method === 'GET') {
+    const settings = await db.settings.findFirst()
+    return NextResponse.json(settings)
+  }
+  
+  if (method === 'PUT' || method === 'POST') {
+    const body = await request.json()
+    let settings = await db.settings.findFirst()
+    if (settings) {
+      settings = await db.settings.update({ where: { id: settings.id }, data: body })
+    } else {
+      settings = await db.settings.create({ data: body })
+    }
+    return NextResponse.json(settings)
+  }
+  
+  return NextResponse.json({ error: 'Method not allowed' }, { status: 405 })
+}
+
+// === INIT ===
+async function handleInit(method: string, request: NextRequest) {
+  if (method === 'GET') {
+    try {
+      const categoriesCount = await db.category.count()
+      const transactionsCount = await db.transaction.count()
+      const settings = await db.settings.findFirst()
+      return NextResponse.json({
+        initialized: categoriesCount > 0,
+        categoriesCount,
+        transactionsCount,
+        hasSettings: !!settings
+      })
+    } catch {
+      return NextResponse.json({ initialized: false })
+    }
+  }
+  
+  if (method === 'POST') {
+    const existingCategories = await db.category.count()
+    if (existingCategories > 0) {
+      return NextResponse.json({ message: 'Already initialized' })
+    }
+    
+    const defaultCategories = [
+      { name: 'Зарплата', icon: 'Briefcase', color: '#22c55e', type: 'income', expenseType: 'variable', isDefault: true },
+      { name: 'Подработка', icon: 'Briefcase', color: '#16a34a', type: 'income', expenseType: 'variable', isDefault: true },
+      { name: 'Инвестиции', icon: 'TrendingUp', color: '#15803d', type: 'income', expenseType: 'variable', isDefault: true },
+      { name: 'Подарки', icon: 'Gift', color: '#4ade80', type: 'income', expenseType: 'variable', isDefault: true },
+      { name: 'Прочие доходы', icon: 'MoreHorizontal', color: '#86efac', type: 'income', expenseType: 'variable', isDefault: true },
+      { name: 'Жилье', icon: 'Home', color: '#45B7D1', type: 'expense', expenseType: 'mandatory', isDefault: true },
+      { name: 'Коммунальные', icon: 'Home', color: '#5DADE2', type: 'expense', expenseType: 'mandatory', isDefault: true },
+      { name: 'Подписки', icon: 'CreditCard', color: '#96CEB4', type: 'expense', expenseType: 'mandatory', isDefault: true },
+      { name: 'Кредиты', icon: 'CreditCard', color: '#3498DB', type: 'expense', expenseType: 'mandatory', isDefault: true },
+      { name: 'Страховка', icon: 'Shield', color: '#5499C7', type: 'expense', expenseType: 'mandatory', isDefault: true },
+      { name: 'Еда', icon: 'Utensils', color: '#FF6B6B', type: 'expense', expenseType: 'variable', isDefault: true },
+      { name: 'Транспорт', icon: 'Car', color: '#4ECDC4', type: 'expense', expenseType: 'variable', isDefault: true },
+      { name: 'Покупки', icon: 'ShoppingBag', color: '#FFEAA7', type: 'expense', expenseType: 'variable', isDefault: true },
+      { name: 'Здоровье', icon: 'Heart', color: '#98D8C8', type: 'expense', expenseType: 'variable', isDefault: true },
+      { name: 'Образование', icon: 'Book', color: '#82E0AA', type: 'expense', expenseType: 'variable', isDefault: true },
+      { name: 'Развлечения', icon: 'Gamepad2', color: '#DDA0DD', type: 'expense', expenseType: 'discretionary', isDefault: true },
+      { name: 'Путешествия', icon: 'Plane', color: '#F7DC6F', type: 'expense', expenseType: 'discretionary', isDefault: true },
+      { name: 'Хобби', icon: 'Sparkles', color: '#F8B500', type: 'expense', expenseType: 'discretionary', isDefault: true },
+      { name: 'Подарки расход', icon: 'Gift', color: '#FF6F61', type: 'expense', expenseType: 'discretionary', isDefault: true },
+      { name: 'Прочее', icon: 'MoreHorizontal', color: '#B2BABB', type: 'expense', expenseType: 'variable', isDefault: true }
+    ]
+    
+    await db.category.createMany({ data: defaultCategories })
+    
+    await db.account.createMany({
+      data: [
+        { name: 'Основной счет', type: 'main', currency: 'RUB', balance: 0, isActive: true },
+        { name: 'Накопления', type: 'savings', currency: 'RUB', balance: 0, isActive: true },
+        { name: 'Наличные', type: 'cash', currency: 'RUB', balance: 0, isActive: true }
+      ]
+    })
+    
+    await db.settings.create({
+      data: {
+        rubToUsdRate: 0.011,
+        theme: 'light',
+        mandatoryPercent: 50,
+        variablePercent: 30,
+        savingsPercent: 10,
+        investmentsPercent: 10
+      }
+    })
+    
+    return NextResponse.json({ success: true, message: 'Database initialized' })
+  }
+  
+  return NextResponse.json({ error: 'Method not allowed' }, { status: 405 })
+}
+
+// === ANALYTICS ===
+async function handleAnalytics(method: string, request: NextRequest) {
+  if (method !== 'GET') {
+    return NextResponse.json({ error: 'Method not allowed' }, { status: 405 })
+  }
+
+  const { searchParams } = new URL(request.url)
+  const month = searchParams.get('month') || getCurrentMonth()
+
+  const [year, monthNum] = month.split('-').map(Number)
+  const startDate = new Date(year, monthNum - 1, 1)
+  const endDate = new Date(year, monthNum, 0, 23, 59, 59)
+
+  // Get current month transactions
+  const transactions = await db.transaction.findMany({
+    where: { date: { gte: startDate, lte: endDate } },
+    include: { category: true }
+  })
+
+  // Calculate totals
+  const totalIncome = transactions.filter(t => t.type === 'income').reduce((sum, t) => sum + t.amount, 0)
+  const totalExpense = transactions.filter(t => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0)
+
+  // Expenses by category with proper structure
+  const expensesByCategoryMap = transactions
+    .filter(t => t.type === 'expense')
+    .reduce((acc, t) => {
+      const catId = t.categoryId
+      if (!acc[catId]) {
+        acc[catId] = {
+          category: {
+            id: catId,
+            name: t.category?.name || 'Другое',
+            color: t.category?.color || '#888888'
+          },
+          amount: 0
+        }
+      }
+      acc[catId].amount += t.amount
+      return acc
+    }, {} as Record<string, { category: { id: string; name: string; color: string | null }; amount: number }>)
+
+  const expensesByCategory = Object.values(expensesByCategoryMap).sort((a, b) => b.amount - a.amount)
+
+  // Expenses by day
+  const expensesByDayMap = transactions
+    .filter(t => t.type === 'expense')
+    .reduce((acc, t) => {
+      const day = new Date(t.date).getDate()
+      if (!acc[day]) {
+        acc[day] = { day, amount: 0 }
+      }
+      acc[day].amount += t.amount
+      return acc
+    }, {} as Record<number, { day: number; amount: number }>)
+
+  const expensesByDay = Object.values(expensesByDayMap).sort((a, b) => a.day - b.day)
+
+  // Previous month data
+  let previousMonth: { month: string; totalIncome: number; totalExpense: number } | null = null
+  const prevMonthStart = new Date(year, monthNum - 2, 1)
+  const prevMonthEnd = new Date(year, monthNum - 1, 0, 23, 59, 59)
+
+  try {
+    const prevTransactions = await db.transaction.findMany({
+      where: { date: { gte: prevMonthStart, lte: prevMonthEnd } }
+    })
+
+    if (prevTransactions.length > 0) {
+      const prevIncome = prevTransactions.filter(t => t.type === 'income').reduce((sum, t) => sum + t.amount, 0)
+      const prevExpense = prevTransactions.filter(t => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0)
+
+      // Calculate previous month string
+      const prevMonthDate = prevMonthStart
+      const prevMonthStr = `${prevMonthDate.getFullYear()}-${String(prevMonthDate.getMonth() + 1).padStart(2, '0')}`
+
+      previousMonth = {
+        month: prevMonthStr,
+        totalIncome: prevIncome,
+        totalExpense: prevExpense
+      }
+    }
+  } catch (e) {
+    console.error('Error fetching previous month:', e)
+  }
+
+  return NextResponse.json({
+    month,
+    totalIncome,
+    totalExpense,
+    balance: totalIncome - totalExpense,
+    expensesByCategory,
+    expensesByDay,
+    previousMonth
+  })
+}
+
+// === EXPORT ===
+async function handleExport(method: string, request: NextRequest) {
+  if (method !== 'GET') {
+    return NextResponse.json({ error: 'Method not allowed' }, { status: 405 })
+  }
+  
+  const [transactions, categories, accounts, budgets] = await Promise.all([
+    db.transaction.findMany({ include: { category: true, account: true } }),
+    db.category.findMany(),
+    db.account.findMany(),
+    db.budget.findMany({ include: { category: true } })
+  ])
+  
+  return NextResponse.json({ transactions, categories, accounts, budgets, exportedAt: new Date().toISOString() })
+}
+
+// === INCOME ===
+async function handleIncome(method: string, request: NextRequest) {
+  await ensureTables()
+  
+  const { searchParams } = new URL(request.url)
+  const month = searchParams.get('month') || getCurrentMonth()
+  
+  if (method === 'GET') {
+    const income = await db.monthlyIncome.findUnique({ where: { month } })
+    
+    if (!income) {
+      const lastRecurring = await db.monthlyIncome.findFirst({
+        where: { isRecurring: true },
+        orderBy: { month: 'desc' }
+      })
+      if (lastRecurring) {
+        return NextResponse.json({ ...lastRecurring, id: null, month, isFromPrevious: true })
+      }
+    }
+    
+    return NextResponse.json(income || { amount: 0, month, isRecurring: true })
+  }
+  
+  if (method === 'POST') {
+    const body = await request.json()
+    const { amount, month: bodyMonth = getCurrentMonth(), source, isRecurring = true } = body
+    
+    if (typeof amount !== 'number' || amount < 0) {
+      return NextResponse.json({ error: 'Invalid amount' }, { status: 400 })
+    }
+    
+    const existing = await db.monthlyIncome.findUnique({ where: { month: bodyMonth } })
+    
+    let income
+    if (existing) {
+      income = await db.monthlyIncome.update({
+        where: { id: existing.id },
+        data: { amount, source, isRecurring }
+      })
+    } else {
+      income = await db.monthlyIncome.create({
+        data: { amount, month: bodyMonth, source, isRecurring }
+      })
+    }
+    
+    return NextResponse.json(income)
+  }
+  
+  return NextResponse.json({ error: 'Method not allowed' }, { status: 405 })
+}
+
+// === BUDGET STATS ===
+async function handleBudgetStats(method: string, request: NextRequest) {
+  await ensureTables()
+  
+  if (method !== 'GET') {
+    return NextResponse.json({ error: 'Method not allowed' }, { status: 405 })
+  }
+  
+  const { searchParams } = new URL(request.url)
+  const month = searchParams.get('month') || getCurrentMonth()
+  
+  const [year, monthNum] = month.split('-').map(Number)
+  const monthStart = startOfMonth(new Date(year, monthNum - 1))
+  const monthEnd = endOfMonth(new Date(year, monthNum - 1))
+  
+  let income = await db.monthlyIncome.findUnique({ where: { month } })
+  if (!income) {
+    const lastRecurring = await db.monthlyIncome.findFirst({
+      where: { isRecurring: true },
+      orderBy: { month: 'desc' }
+    })
+    income = lastRecurring ? { ...lastRecurring, month } as any : null
+  }
+  
+  const plannedIncome = income?.amount || 0
+  
+  const mandatoryCategories = await db.category.findMany({
+    where: { type: 'expense', expenseType: 'mandatory' },
+    include: { budgets: { where: { month } } }
+  })
+  
+  const mandatoryBudgetTotal = mandatoryCategories.reduce((sum, cat) => sum + (cat.budgets[0]?.amount || 0), 0)
+  
+  const transactions = await db.transaction.findMany({
+    where: { date: { gte: monthStart, lte: monthEnd } },
+    include: { category: true }
+  })
+  
+  const mandatorySpent = transactions
+    .filter(t => t.type === 'expense' && t.category?.expenseType === 'mandatory')
+    .reduce((sum, t) => sum + t.amount, 0)
+  
+  const mandatoryOverspent = Math.max(0, mandatorySpent - mandatoryBudgetTotal)
+  const otherExpenses = transactions
+    .filter(t => t.type === 'expense' && t.category?.expenseType !== 'mandatory')
+    .reduce((sum, t) => sum + t.amount, 0)
+  
+  const remainingBudget = plannedIncome - mandatoryBudgetTotal
+  const actualRemaining = remainingBudget - mandatoryOverspent - otherExpenses
+  
+  let budgetStats = await db.monthlyBudgetStats.findUnique({ where: { month } })
+  
+  const statsData = {
+    plannedIncome,
+    mandatoryBudgetTotal,
+    mandatorySpent,
+    mandatoryOverspent,
+    otherExpenses,
+    remainingBudget,
+    actualRemaining
+  }
+  
+  if (budgetStats) {
+    budgetStats = await db.monthlyBudgetStats.update({
+      where: { id: budgetStats.id },
+      data: statsData
+    })
+  } else {
+    budgetStats = await db.monthlyBudgetStats.create({
+      data: { month, ...statsData }
+    })
+  }
+  
+  const categoryStats = await Promise.all(
+    mandatoryCategories.map(async (cat) => {
+      const spent = await db.transaction.aggregate({
+        where: {
+          categoryId: cat.id,
+          type: 'expense',
+          date: { gte: monthStart, lte: monthEnd }
+        },
+        _sum: { amount: true }
+      })
+      
+      const budget = cat.budgets[0]?.amount || 0
+      const spentAmount = spent._sum.amount || 0
+      
+      return {
+        id: cat.id,
+        name: cat.name,
+        color: cat.color,
+        budget,
+        spent: spentAmount,
+        overspent: Math.max(0, spentAmount - budget),
+        remaining: Math.max(0, budget - spentAmount)
+      }
+    })
+  )
+  
+  const avgResults: number[] = []
+  for (let i = 0; i < 3; i++) {
+    const date = subMonths(new Date(), i)
+    const mStr = format(date, 'yyyy-MM')
+    const [y, m] = mStr.split('-').map(Number)
+    const ms = startOfMonth(new Date(y, m - 1))
+    const me = endOfMonth(new Date(y, m - 1))
+    
+    const spent = await db.transaction.aggregate({
+      where: {
+        type: 'expense',
+        category: { expenseType: 'mandatory' },
+        date: { gte: ms, lte: me }
+      },
+      _sum: { amount: true }
+    })
+    avgResults.push(spent._sum.amount || 0)
+  }
+  
+  return NextResponse.json({
+    ...budgetStats,
+    categoryStats,
+    avgMandatoryExpenses: avgResults.reduce((a, b) => a + b, 0) / 3,
+    mandatoryCategoriesTotal: categoryStats.reduce((s, c) => s + c.budget, 0),
+    mandatorySpentTotal: categoryStats.reduce((s, c) => s + c.spent, 0),
+    mandatoryOverspentTotal: categoryStats.reduce((s, c) => s + c.overspent, 0)
+  })
+}
+
+// === AUTH ===
+async function handleAuth(method: string, action: string | undefined, request: NextRequest) {
+  try {
+    if (action === 'check') {
+      try {
+        const settings = await db.settings.findFirst()
+        return NextResponse.json({ hasPassword: !!settings?.passwordHash })
+      } catch (dbError) {
+        // Settings table doesn't exist yet
+        console.error('Settings table error:', dbError)
+        return NextResponse.json({ hasPassword: false })
+      }
+    }
+    
+    if (action === 'setup' && method === 'POST') {
+      const body = await request.json()
+      const { password, confirmPassword } = body
+      
+      if (!password || password.length < 4) {
+        return NextResponse.json({ error: 'Пароль должен быть не менее 4 символов' }, { status: 400 })
+      }
+      
+      if (password !== confirmPassword) {
+        return NextResponse.json({ error: 'Пароли не совпадают' }, { status: 400 })
+      }
+      
+      let settings
+      try {
+        settings = await db.settings.findFirst()
+      } catch (dbError: any) {
+        // Table doesn't exist, will create
+        console.log('Settings table not found, creating...', dbError?.message)
+      }
+      
+      if (settings?.passwordHash) {
+        return NextResponse.json({ error: 'Пароль уже установлен' }, { status: 400 })
+      }
+      
+      const passwordHash = hashPassword(password)
+      
+      if (settings) {
+        await db.settings.update({ where: { id: settings.id }, data: { passwordHash } })
+      } else {
+        settings = await db.settings.create({ 
+          data: { 
+            passwordHash,
+            rubToUsdRate: 0.011,
+            theme: 'light',
+            mandatoryPercent: 50,
+            variablePercent: 30,
+            savingsPercent: 10,
+            investmentsPercent: 10
+          } 
+        })
+      }
+      
+      // Create session token
+      const expiresAt = Date.now() + 7 * 24 * 60 * 60 * 1000 // 7 days
+      const token = encryptSession({ userId: 'user', expiresAt })
+      
+      // Create response with session cookie
+      const response = NextResponse.json({ success: true })
+      response.cookies.set('session', token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 7 * 24 * 60 * 60, // 7 days
+        path: '/',
+      })
+      
+      return response
+    }
+    
+    if (action === 'login' && method === 'POST') {
+      const body = await request.json()
+      const { password } = body
+      
+      if (!password) {
+        return NextResponse.json({ error: 'Введите пароль' }, { status: 400 })
+      }
+      
+      let settings
+      try {
+        settings = await db.settings.findFirst()
+      } catch (dbError: any) {
+        console.error('Settings table error on login:', dbError)
+        return NextResponse.json({ 
+          error: 'Ошибка базы данных', 
+          details: dbError?.message || 'Settings table may not exist'
+        }, { status: 500 })
+      }
+      
+      if (!settings?.passwordHash) {
+        return NextResponse.json({ error: 'Пароль не установлен. Выполните настройку.' }, { status: 400 })
+      }
+      
+      let isValid = false
+      try {
+        isValid = verifyPassword(password, settings.passwordHash)
+      } catch (verifyError: any) {
+        console.error('Password verify error:', verifyError)
+        return NextResponse.json({ 
+          error: 'Ошибка проверки пароля', 
+          details: verifyError?.message 
+        }, { status: 500 })
+      }
+      
+      if (!isValid) {
+        return NextResponse.json({ error: 'Неверный пароль' }, { status: 401 })
+      }
+      
+      // Create session token
+      const expiresAt = Date.now() + 7 * 24 * 60 * 60 * 1000 // 7 days
+      const token = encryptSession({ userId: 'user', expiresAt })
+      
+      // Create response with session cookie
+      const response = NextResponse.json({ success: true })
+      response.cookies.set('session', token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 7 * 24 * 60 * 60, // 7 days
+        path: '/',
+      })
+      
+      return response
+    }
+    
+    if (action === 'change-password' && method === 'POST') {
+      const { currentPassword, newPassword } = await request.json()
+      const settings = await db.settings.findFirst()
+      
+      if (!settings?.passwordHash) {
+        return NextResponse.json({ error: 'Пароль не установлен' }, { status: 400 })
+      }
+      
+      if (!verifyPassword(currentPassword, settings.passwordHash)) {
+        return NextResponse.json({ error: 'Неверный текущий пароль' }, { status: 401 })
+      }
+      
+      await db.settings.update({
+        where: { id: settings.id },
+        data: { passwordHash: hashPassword(newPassword) }
+      })
+      
+      return NextResponse.json({ success: true })
+    }
+    
+    if (action === 'logout') {
+      return NextResponse.json({ success: true })
+    }
+    
+    return NextResponse.json({ error: 'Invalid auth action' }, { status: 400 })
+  } catch (error) {
+    console.error('Auth handler error:', error)
+    return NextResponse.json({ 
+      error: 'Ошибка авторизации', 
+      details: error instanceof Error ? error.message : 'Unknown error' 
+    }, { status: 500 })
+  }
+}
