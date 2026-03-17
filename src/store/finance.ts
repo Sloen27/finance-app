@@ -115,6 +115,8 @@ export interface BudgetStats {
   otherExpenses: number
   remainingBudget: number
   actualRemaining: number
+  currentRemaining: number
+  totalExpense: number
   categoryStats: CategoryBudgetStat[]
   avgMandatoryExpenses: number
 }

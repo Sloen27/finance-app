@@ -160,6 +160,8 @@ model MonthlyBudgetStats {
   otherExpenses         Float    @default(0) // Другие расходы
   remainingBudget       Float    @default(0) // Остаток бюджета
   actualRemaining       Float    @default(0) // Фактический остаток с учётом всех трат
+  currentRemaining      Float    @default(0) // Остаток на текущий момент (доход - все расходы)
+  totalExpense          Float    @default(0) // Всего расходов за месяц
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
 

@@ -136,6 +136,8 @@ export function BudgetWidget() {
   const mandatoryOverspent = budgetStats?.mandatoryOverspent || 0
   const otherExpenses = budgetStats?.otherExpenses || 0
   const actualRemaining = budgetStats?.actualRemaining || 0
+  const currentRemaining = budgetStats?.currentRemaining || 0
+  const totalExpense = budgetStats?.totalExpense || 0
   const categoryStats = budgetStats?.categoryStats || []
 
   // Calculate percentage of income remaining
@@ -290,20 +292,86 @@ export function BudgetWidget() {
                   </div>
                 </div>
 
-                {/* Remaining */}
-                <div className={`p-3 rounded-lg ${
-                  actualRemaining >= 0
-                    ? 'bg-emerald-50 dark:bg-emerald-950/30'
-                    : 'bg-red-50 dark:bg-red-950/30'
-                }`}>
-                  <div className="text-sm text-muted-foreground">Осталось</div>
-                  <div className={`text-xl font-bold ${
-                    actualRemaining >= 0 ? 'text-emerald-600' : 'text-red-600'
-                  }`}>
-                    {formatMoney(actualRemaining)}
-                  </div>
-                </div>
+                {/* Current Remaining - actual remaining without planned mandatory */}
+                <HoverCard>
+                  <HoverCardTrigger asChild>
+                    <div className={`p-3 rounded-lg cursor-pointer ${
+                      currentRemaining >= 0
+                        ? 'bg-teal-50 dark:bg-teal-950/30'
+                        : 'bg-red-50 dark:bg-red-950/30'
+                    }`}>
+                      <div className="text-sm text-muted-foreground flex items-center gap-1">
+                        Осталось сейчас
+                        <Info className="h-3 w-3" />
+                      </div>
+                      <div className={`text-xl font-bold ${
+                        currentRemaining >= 0 ? 'text-teal-600' : 'text-red-600'
+                      }`}>
+                        {formatMoney(currentRemaining)}
+                      </div>
+                    </div>
+                  </HoverCardTrigger>
+                  <HoverCardContent className="w-80">
+                    <div className="space-y-3">
+                      <h4 className="font-semibold">Осталось на текущий момент</h4>
+                      <div className="space-y-2 text-sm">
+                        <p className="text-muted-foreground">
+                          Реальный остаток с учётом только фактических расходов за месяц.
+                        </p>
+                        <div className="bg-muted p-2 rounded text-xs font-mono space-y-1">
+                          <div>Доход - Всего расходов</div>
+                          <div className="text-muted-foreground">= {formatMoney(plannedIncome)} - {formatMoney(totalExpense)}</div>
+                        </div>
+                        <p className="text-muted-foreground text-xs">
+                          Не учитывает запланированные обязательные расходы, которые ещё не наступили.
+                        </p>
+                      </div>
+                    </div>
+                  </HoverCardContent>
+                </HoverCard>
               </div>
+
+              {/* Second row - Remaining after planned mandatory */}
+              <HoverCard>
+                <HoverCardTrigger asChild>
+                  <div className={`p-3 rounded-lg cursor-pointer ${
+                    actualRemaining >= 0
+                      ? 'bg-emerald-50 dark:bg-emerald-950/30'
+                      : 'bg-red-50 dark:bg-red-950/30'
+                  }`}>
+                    <div className="flex items-center justify-between">
+                      <div className="text-sm text-muted-foreground flex items-center gap-1">
+                        Осталось (с учётом плана)
+                        <Info className="h-3 w-3" />
+                      </div>
+                      <div className={`text-lg font-bold ${
+                        actualRemaining >= 0 ? 'text-emerald-600' : 'text-red-600'
+                      }`}>
+                        {formatMoney(actualRemaining)}
+                      </div>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Учитывает все запланированные обязательные расходы
+                    </p>
+                  </div>
+                </HoverCardTrigger>
+                <HoverCardContent className="w-80">
+                  <div className="space-y-3">
+                    <h4 className="font-semibold">Осталось с учётом плана</h4>
+                    <div className="space-y-2 text-sm">
+                      <p className="text-muted-foreground">
+                        Остаток после вычета всех запланированных обязательных расходов, даже если они ещё не наступили.
+                      </p>
+                      <div className="bg-muted p-2 rounded text-xs font-mono space-y-1">
+                        <div>Доход - Обязательные(план) - Перерасход - Другие расходы</div>
+                        <div className="text-muted-foreground">
+                          = {formatMoney(plannedIncome)} - {formatMoney(mandatoryTotal)} - {formatMoney(mandatoryOverspent)} - {formatMoney(otherExpenses)}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </HoverCardContent>
+              </HoverCard>
 
               {/* Mandatory Budget */}
               <HoverCard>

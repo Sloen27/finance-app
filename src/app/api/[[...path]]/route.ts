@@ -19,7 +19,7 @@ function getCurrentMonth() {
 // Ensure required tables exist
 async function ensureTables() {
   const tables = ['MonthlyIncome', 'MonthlyBudgetStats']
-  
+
   for (const table of tables) {
     try {
       await db.$queryRawUnsafe(`SELECT 1 FROM "${table}" LIMIT 1`)
@@ -52,6 +52,8 @@ async function ensureTables() {
               "otherExpenses" DOUBLE PRECISION NOT NULL DEFAULT 0,
               "remainingBudget" DOUBLE PRECISION NOT NULL DEFAULT 0,
               "actualRemaining" DOUBLE PRECISION NOT NULL DEFAULT 0,
+              "currentRemaining" DOUBLE PRECISION NOT NULL DEFAULT 0,
+              "totalExpense" DOUBLE PRECISION NOT NULL DEFAULT 0,
               "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
               "updatedAt" TIMESTAMP(3) NOT NULL,
               CONSTRAINT "MonthlyBudgetStats_pkey" PRIMARY KEY ("id")
@@ -62,6 +64,23 @@ async function ensureTables() {
       } catch (e) {
         console.error(`Error creating ${table} table:`, e)
       }
+    }
+  }
+
+  // Add missing columns to MonthlyBudgetStats if they don't exist
+  try {
+    // Try to select the new columns, if it fails, add them
+    await db.$queryRawUnsafe(`SELECT "currentRemaining", "totalExpense" FROM "MonthlyBudgetStats" LIMIT 1`)
+  } catch {
+    try {
+      await db.$executeRawUnsafe(`ALTER TABLE "MonthlyBudgetStats" ADD COLUMN "currentRemaining" DOUBLE PRECISION NOT NULL DEFAULT 0`)
+    } catch (e) {
+      // Column might already exist
+    }
+    try {
+      await db.$executeRawUnsafe(`ALTER TABLE "MonthlyBudgetStats" ADD COLUMN "totalExpense" DOUBLE PRECISION NOT NULL DEFAULT 0`)
+    } catch (e) {
+      // Column might already exist
     }
   }
 }
@@ -930,6 +949,10 @@ async function handleBudgetStats(method: string, request: NextRequest) {
   
   const remainingBudget = plannedIncome - mandatoryBudgetTotal
   const actualRemaining = remainingBudget - mandatoryOverspent - otherExpenses
+
+  // Current remaining = income - all actual expenses (without considering planned mandatory as spent)
+  const totalExpense = transactions.filter(t => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0)
+  const currentRemaining = plannedIncome - totalExpense
   
   let budgetStats = await db.monthlyBudgetStats.findUnique({ where: { month } })
   
@@ -940,7 +963,9 @@ async function handleBudgetStats(method: string, request: NextRequest) {
     mandatoryOverspent,
     otherExpenses,
     remainingBudget,
-    actualRemaining
+    actualRemaining,
+    currentRemaining,
+    totalExpense
   }
   
   if (budgetStats) {
