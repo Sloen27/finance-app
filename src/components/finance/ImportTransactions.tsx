@@ -304,7 +304,7 @@ export function ImportTransactions({ open, onOpenChange, onImported }: ImportTra
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col">
+      <DialogContent className="w-[95vw] max-w-[1200px] max-h-[92vh] flex flex-col p-4 sm:p-6">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <FileSpreadsheet className="h-5 w-5 text-green-600" />
@@ -333,7 +333,7 @@ export function ImportTransactions({ open, onOpenChange, onImported }: ImportTra
 
         {/* STEP: PREVIEW */}
         {step === 'preview' && (
-          <div className="flex flex-col gap-4 flex-1 min-h-0">
+          <div className="flex flex-col gap-3 flex-1 min-h-0 overflow-hidden">
             {/* Stats */}
             <div className="flex flex-wrap items-center gap-3">
               <span className="text-sm text-muted-foreground">{fileName}</span>
@@ -394,11 +394,15 @@ export function ImportTransactions({ open, onOpenChange, onImported }: ImportTra
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="openai/gpt-4o-mini">GPT-4o Mini (быстро)</SelectItem>
-                      <SelectItem value="openai/gpt-4o">GPT-4o (точнее)</SelectItem>
-                      <SelectItem value="anthropic/claude-3-haiku">Claude 3 Haiku</SelectItem>
-                      <SelectItem value="anthropic/claude-3.5-sonnet">Claude 3.5 Sonnet</SelectItem>
-                      <SelectItem value="google/gemini-flash-1.5">Gemini Flash 1.5</SelectItem>
+                      <SelectItem value="meta-llama/llama-3.1-8b-instruct:free">🆓 Llama 3.1 8B (бесплатно)</SelectItem>
+                      <SelectItem value="google/gemini-2.0-flash-exp:free">🆓 Gemini 2.0 Flash (бесплатно)</SelectItem>
+                      <SelectItem value="deepseek/deepseek-chat:free">🆓 DeepSeek Chat (бесплатно)</SelectItem>
+                      <SelectItem value="mistralai/mistral-7b-instruct:free">🆓 Mistral 7B (бесплатно)</SelectItem>
+                      <SelectItem value="openai/gpt-4o-mini">💰 GPT-4o Mini (быстро)</SelectItem>
+                      <SelectItem value="openai/gpt-4o">💰 GPT-4o (точнее)</SelectItem>
+                      <SelectItem value="anthropic/claude-3-haiku">💰 Claude 3 Haiku</SelectItem>
+                      <SelectItem value="anthropic/claude-3.5-sonnet">💰 Claude 3.5 Sonnet</SelectItem>
+                      <SelectItem value="google/gemini-flash-1.5">💰 Gemini Flash 1.5</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -436,7 +440,7 @@ export function ImportTransactions({ open, onOpenChange, onImported }: ImportTra
             </div>
 
             {/* Table */}
-            <ScrollArea className="flex-1 border rounded-lg">
+            <ScrollArea className="flex-1 min-h-0 border rounded-lg overflow-auto">
               <table className="w-full text-sm">
                 <thead className="bg-muted/50 sticky top-0">
                   <tr>

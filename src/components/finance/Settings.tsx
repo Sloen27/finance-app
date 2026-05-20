@@ -553,11 +553,15 @@ export function Settings() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="openai/gpt-4o-mini">GPT-4o Mini — быстро и дёшево</SelectItem>
-                  <SelectItem value="openai/gpt-4o">GPT-4o — точнее</SelectItem>
-                  <SelectItem value="anthropic/claude-3-haiku">Claude 3 Haiku — быстро</SelectItem>
-                  <SelectItem value="anthropic/claude-3.5-sonnet">Claude 3.5 Sonnet — лучшее качество</SelectItem>
-                  <SelectItem value="google/gemini-flash-1.5">Gemini Flash 1.5</SelectItem>
+                  <SelectItem value="meta-llama/llama-3.1-8b-instruct:free">🆓 Llama 3.1 8B — бесплатно</SelectItem>
+                  <SelectItem value="google/gemini-2.0-flash-exp:free">🆓 Gemini 2.0 Flash — бесплатно</SelectItem>
+                  <SelectItem value="deepseek/deepseek-chat:free">🆓 DeepSeek Chat — бесплатно</SelectItem>
+                  <SelectItem value="mistralai/mistral-7b-instruct:free">🆓 Mistral 7B — бесплатно</SelectItem>
+                  <SelectItem value="openai/gpt-4o-mini">💰 GPT-4o Mini — быстро и дёшево</SelectItem>
+                  <SelectItem value="openai/gpt-4o">💰 GPT-4o — точнее</SelectItem>
+                  <SelectItem value="anthropic/claude-3-haiku">💰 Claude 3 Haiku</SelectItem>
+                  <SelectItem value="anthropic/claude-3.5-sonnet">💰 Claude 3.5 Sonnet — лучшее качество</SelectItem>
+                  <SelectItem value="google/gemini-flash-1.5">💰 Gemini Flash 1.5</SelectItem>
                 </SelectContent>
               </Select>
             </div>
