@@ -124,7 +124,7 @@ export function ImportTransactions({ open, onOpenChange, onImported }: ImportTra
         const data = new Uint8Array(e.target?.result as ArrayBuffer)
         const wb = XLSX.read(data, { type: 'array', cellDates: true })
         const ws = wb.Sheets[wb.SheetNames[0]]
-        const raw = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, cellDates: true }) as any[][]
+        const raw = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true }) as any[][]
 
         const parsed: ParsedRow[] = []
         for (let i = 1; i < raw.length; i++) {
