@@ -231,6 +231,11 @@ export function Transactions() {
                 </Button>
               </div>
 
+              <Button variant="outline" onClick={() => setIsImportOpen(true)}>
+                <Upload className="h-4 w-4 mr-2" />
+                Импорт
+              </Button>
+
               <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
                 <Button onClick={() => {
                   setEditingTransaction(null)
