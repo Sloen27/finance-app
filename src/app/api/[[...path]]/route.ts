@@ -231,7 +231,8 @@ async function handleTransactions(method: string, id: string | undefined, reques
       return NextResponse.json(transactions)
     }
 
-    if (method === 'POST') {
+
+      if (method === 'POST') {
       let body
       try {
         body = await request.json()
@@ -407,6 +408,82 @@ async function handleBudgets(method: string, id: string | undefined, request: Ne
       return NextResponse.json(budgets)
     }
 
+
+    // === AUTO-FILL: calculate average spending per category over last 3 months ===
+    if (method === 'POST' && id === 'auto-fill') {
+      let body: any = {}
+      try { body = await request.json() } catch {}
+      const month = body.month || getCurrentMonth()
+
+      const [year, monthNum] = month.split('-').map(Number)
+
+      // Build the 3 months BEFORE the target month
+      const refDate = new Date(year, monthNum - 1, 1)
+      const prevMonths = [1, 2, 3].map(n => {
+        const d = subMonths(refDate, n)
+        return format(d, 'yyyy-MM')
+      })
+
+      // Get all expense categories
+      const expenseCategories = await db.category.findMany({
+        where: { type: 'expense' }
+      })
+
+      const results: any[] = []
+
+      for (const cat of expenseCategories) {
+        // Sum spending per previous month
+        const monthlyTotals: number[] = []
+        for (const pm of prevMonths) {
+          const [py, pm2] = pm.split('-').map(Number)
+          const ms = startOfMonth(new Date(py, pm2 - 1))
+          const me = endOfMonth(new Date(py, pm2 - 1))
+          const agg = await db.transaction.aggregate({
+            where: { categoryId: cat.id, type: 'expense', date: { gte: ms, lte: me } },
+            _sum: { amount: true }
+          })
+          const spent = agg._sum.amount || 0
+          if (spent > 0) monthlyTotals.push(spent)
+        }
+
+        let targetAmount: number
+        if (monthlyTotals.length > 0) {
+          // Average over months that had spending
+          targetAmount = Math.round(monthlyTotals.reduce((a, b) => a + b, 0) / monthlyTotals.length)
+        } else {
+          // Fallback: use budget from previous month if set
+          const prevBudget = await db.budget.findFirst({
+            where: { categoryId: cat.id, month: { lt: month } },
+            orderBy: { month: 'desc' }
+          })
+          if (prevBudget) {
+            targetAmount = prevBudget.amount
+          } else {
+            continue // no data at all — skip
+          }
+        }
+
+        // Upsert budget for target month
+        const existing = await db.budget.findFirst({ where: { categoryId: cat.id, month } })
+        let budget
+        if (existing) {
+          budget = await db.budget.update({
+            where: { id: existing.id },
+            data: { amount: targetAmount },
+            include: { category: true }
+          })
+        } else {
+          budget = await db.budget.create({
+            data: { categoryId: cat.id, amount: targetAmount, month, currency: 'RUB' },
+            include: { category: true }
+          })
+        }
+        results.push(budget)
+      }
+
+      return NextResponse.json({ updated: results.length, budgets: results })
+    }
+
     if (method === 'POST') {
       let body
       try {
@@ -486,80 +563,6 @@ async function handleBudgets(method: string, id: string | undefined, request: Ne
       return NextResponse.json({ success: true })
     }
 
-    // === AUTO-FILL: calculate average spending per category over last 3 months ===
-    if (method === 'POST' && id === 'auto-fill') {
-      let body: any = {}
-      try { body = await request.json() } catch {}
-      const month = body.month || getCurrentMonth()
-
-      const [year, monthNum] = month.split('-').map(Number)
-
-      // Build the 3 months BEFORE the target month
-      const refDate = new Date(year, monthNum - 1, 1)
-      const prevMonths = [1, 2, 3].map(n => {
-        const d = subMonths(refDate, n)
-        return format(d, 'yyyy-MM')
-      })
-
-      // Get all expense categories
-      const expenseCategories = await db.category.findMany({
-        where: { type: 'expense' }
-      })
-
-      const results: any[] = []
-
-      for (const cat of expenseCategories) {
-        // Sum spending per previous month
-        const monthlyTotals: number[] = []
-        for (const pm of prevMonths) {
-          const [py, pm2] = pm.split('-').map(Number)
-          const ms = startOfMonth(new Date(py, pm2 - 1))
-          const me = endOfMonth(new Date(py, pm2 - 1))
-          const agg = await db.transaction.aggregate({
-            where: { categoryId: cat.id, type: 'expense', date: { gte: ms, lte: me } },
-            _sum: { amount: true }
-          })
-          const spent = agg._sum.amount || 0
-          if (spent > 0) monthlyTotals.push(spent)
-        }
-
-        let targetAmount: number
-        if (monthlyTotals.length > 0) {
-          // Average over months that had spending
-          targetAmount = Math.round(monthlyTotals.reduce((a, b) => a + b, 0) / monthlyTotals.length)
-        } else {
-          // Fallback: use budget from previous month if set
-          const prevBudget = await db.budget.findFirst({
-            where: { categoryId: cat.id, month: { lt: month } },
-            orderBy: { month: 'desc' }
-          })
-          if (prevBudget) {
-            targetAmount = prevBudget.amount
-          } else {
-            continue // no data at all — skip
-          }
-        }
-
-        // Upsert budget for target month
-        const existing = await db.budget.findFirst({ where: { categoryId: cat.id, month } })
-        let budget
-        if (existing) {
-          budget = await db.budget.update({
-            where: { id: existing.id },
-            data: { amount: targetAmount },
-            include: { category: true }
-          })
-        } else {
-          budget = await db.budget.create({
-            data: { categoryId: cat.id, amount: targetAmount, month, currency: 'RUB' },
-            include: { category: true }
-          })
-        }
-        results.push(budget)
-      }
-
-      return NextResponse.json({ updated: results.length, budgets: results })
-    }
 
     return NextResponse.json({ error: 'Method not allowed' }, { status: 405 })
   } catch (error) {
