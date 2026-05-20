@@ -85,6 +85,7 @@ model Settings {
   savingsPercent     Float    @default(10)
   investmentsPercent Float    @default(10)
   passwordHash       String?
+  openrouterApiKey   String?
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 }

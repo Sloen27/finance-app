@@ -27,17 +27,29 @@ export function Settings() {
   const [passwordSuccess, setPasswordSuccess] = useState('')
   const [isChangingPassword, setIsChangingPassword] = useState(false)
 
-  // OpenRouter API key (stored in localStorage)
-  const [openrouterKey, setOpenrouterKey] = useState(() =>
-    typeof window !== 'undefined' ? localStorage.getItem('openrouter_api_key') || '' : ''
-  )
+  // OpenRouter API key (stored in DB)
+  const [openrouterKey, setOpenrouterKey] = useState(settings?.openrouterApiKey || '')
   const [showOpenrouterKey, setShowOpenrouterKey] = useState(false)
   const [openrouterSaved, setOpenrouterSaved] = useState(false)
+  const [isSavingKey, setIsSavingKey] = useState(false)
 
-  const handleSaveOpenrouterKey = () => {
-    localStorage.setItem('openrouter_api_key', openrouterKey.trim())
-    setOpenrouterSaved(true)
-    setTimeout(() => setOpenrouterSaved(false), 2000)
+  const handleSaveOpenrouterKey = async () => {
+    setIsSavingKey(true)
+    try {
+      const response = await fetch('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ openrouterApiKey: openrouterKey.trim() })
+      })
+      const data = await response.json()
+      setSettings(data)
+      setOpenrouterSaved(true)
+      setTimeout(() => setOpenrouterSaved(false), 2000)
+    } catch (error) {
+      console.error('Error saving OpenRouter key:', error)
+    } finally {
+      setIsSavingKey(false)
+    }
   }
 
   // Distribution percentages
@@ -54,6 +66,7 @@ export function Settings() {
       setVariablePercent(settings.variablePercent?.toString() || '30')
       setSavingsPercent(settings.savingsPercent?.toString() || '10')
       setInvestmentsPercent(settings.investmentsPercent?.toString() || '10')
+      setOpenrouterKey(settings.openrouterApiKey || '')
     }
   }, [settings])
 
@@ -523,10 +536,10 @@ export function Settings() {
                   {showOpenrouterKey ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
                 </Button>
               </div>
-              <Button onClick={handleSaveOpenrouterKey} variant="outline">
+              <Button onClick={handleSaveOpenrouterKey} variant="outline" disabled={isSavingKey}>
                 {openrouterSaved
                   ? <><CheckCircle2 className="h-4 w-4 mr-2 text-green-500" />Сохранено</>
-                  : 'Сохранить'
+                  : isSavingKey ? 'Сохранение...' : 'Сохранить'
                 }
               </Button>
             </div>

@@ -74,7 +74,7 @@ const BANK_CATEGORY_MAP: Record<string, string> = {
 }
 
 export function ImportTransactions({ open, onOpenChange, onImported }: ImportTransactionsProps) {
-  const { categories, addTransaction } = useFinanceStore()
+  const { categories, addTransaction, settings } = useFinanceStore()
 
   const [rows, setRows] = useState<ParsedRow[]>([])
   const [step, setStep] = useState<'upload' | 'preview' | 'importing' | 'done'>('upload')
@@ -83,13 +83,18 @@ export function ImportTransactions({ open, onOpenChange, onImported }: ImportTra
   const [isCategorizingLLM, setIsCategorizingLLM] = useState(false)
   const [llmError, setLlmError] = useState('')
   const [showApiKey, setShowApiKey] = useState(false)
-  const [openrouterKey, setOpenrouterKey] = useState(() =>
-    typeof window !== 'undefined' ? localStorage.getItem('openrouter_api_key') || '' : ''
-  )
+  const [openrouterKey, setOpenrouterKey] = useState(settings?.openrouterApiKey || '')
   const [llmModel, setLlmModel] = useState('openai/gpt-4o-mini')
   const [fileName, setFileName] = useState('')
   const [showSettings, setShowSettings] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
+
+  // Sync key when settings loads from DB
+  useEffect(() => {
+    if (settings?.openrouterApiKey) {
+      setOpenrouterKey(settings.openrouterApiKey)
+    }
+  }, [settings?.openrouterApiKey])
 
   const expenseCategories = categories.filter(c => c.type === 'expense')
   const incomeCategories = categories.filter(c => c.type === 'income')
@@ -197,9 +202,6 @@ export function ImportTransactions({ open, onOpenChange, onImported }: ImportTra
     }
     setLlmError('')
     setIsCategorizingLLM(true)
-
-    // Save key for future sessions
-    localStorage.setItem('openrouter_api_key', openrouterKey.trim())
 
     try {
       const selectedRows = rows.filter(r => r.selected)
@@ -374,7 +376,7 @@ export function ImportTransactions({ open, onOpenChange, onImported }: ImportTra
                   <div className="flex-1 relative">
                     <Input
                       type={showApiKey ? 'text' : 'password'}
-                      placeholder="sk-or-v1-..."
+                      placeholder={settings?.openrouterApiKey ? "Ключ сохранён в настройках" : "sk-or-v1-..."}
                       value={openrouterKey}
                       onChange={e => setOpenrouterKey(e.target.value)}
                     />

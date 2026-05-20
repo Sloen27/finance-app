@@ -69,19 +69,23 @@ async function ensureTables() {
 
   // Add missing columns to MonthlyBudgetStats if they don't exist
   try {
-    // Try to select the new columns, if it fails, add them
     await db.$queryRawUnsafe(`SELECT "currentRemaining", "totalExpense" FROM "MonthlyBudgetStats" LIMIT 1`)
   } catch {
     try {
       await db.$executeRawUnsafe(`ALTER TABLE "MonthlyBudgetStats" ADD COLUMN "currentRemaining" DOUBLE PRECISION NOT NULL DEFAULT 0`)
-    } catch (e) {
-      // Column might already exist
-    }
+    } catch (e) { /* Column might already exist */ }
     try {
       await db.$executeRawUnsafe(`ALTER TABLE "MonthlyBudgetStats" ADD COLUMN "totalExpense" DOUBLE PRECISION NOT NULL DEFAULT 0`)
-    } catch (e) {
-      // Column might already exist
-    }
+    } catch (e) { /* Column might already exist */ }
+  }
+
+  // Add openrouterApiKey column to Settings if missing
+  try {
+    await db.$queryRawUnsafe(`SELECT "openrouterApiKey" FROM "Settings" LIMIT 1`)
+  } catch {
+    try {
+      await db.$executeRawUnsafe(`ALTER TABLE "Settings" ADD COLUMN "openrouterApiKey" TEXT`)
+    } catch (e) { /* Column might already exist */ }
   }
 }
 
@@ -649,6 +653,7 @@ async function handleRegularPayments(method: string, id: string | undefined, req
 
 // === SETTINGS ===
 async function handleSettings(method: string, request: NextRequest) {
+  await ensureTables()
   if (method === 'GET') {
     const settings = await db.settings.findFirst()
     return NextResponse.json(settings)
