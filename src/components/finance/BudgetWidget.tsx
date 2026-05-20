@@ -24,26 +24,26 @@ import {
 import {
   Wallet,
   Edit3,
-  TrendingDown,
   AlertCircle,
   CheckCircle2,
   Info,
   PiggyBank,
-  ArrowDownRight,
-  ArrowUpRight,
-  Loader2
+  Loader2,
+  Calculator
 } from 'lucide-react'
 import { format } from 'date-fns'
 import { ru } from 'date-fns/locale'
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts'
 
 export function BudgetWidget() {
-  const { monthlyIncome, budgetStats, setMonthlyIncome, setBudgetStats, currentMonth } = useFinanceStore()
+  const { monthlyIncome, budgetStats, setMonthlyIncome, setBudgetStats, setBudgets, currentMonth } = useFinanceStore()
 
   const [isEditingIncome, setIsEditingIncome] = useState(false)
   const [incomeAmount, setIncomeAmount] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [isDataLoading, setIsDataLoading] = useState(true)
+  const [isAutoFilling, setIsAutoFilling] = useState(false)
+  const [autoFillDone, setAutoFillDone] = useState(false)
 
   // Load income and budget stats when month changes
   useEffect(() => {
@@ -118,6 +118,41 @@ export function BudgetWidget() {
     }
   }
 
+  const handleAutoFill = async () => {
+    setIsAutoFilling(true)
+    try {
+      const response = await fetch('/api/budgets/auto-fill', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ month: currentMonth })
+      })
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}))
+        throw new Error(err.error || 'Ошибка при расчёте')
+      }
+      const data = await response.json()
+      // Refresh budgets and stats
+      const [budgetsRes, statsRes] = await Promise.all([
+        fetch(`/api/budgets?month=${currentMonth}`),
+        fetch(`/api/budget-stats?month=${currentMonth}`)
+      ])
+      if (budgetsRes.ok) {
+        const budgetsData = await budgetsRes.json()
+        setBudgets(budgetsData)
+      }
+      if (statsRes.ok) {
+        const statsData = await statsRes.json()
+        setBudgetStats(statsData)
+      }
+      setAutoFillDone(true)
+      setTimeout(() => setAutoFillDone(false), 3000)
+    } catch (error) {
+      alert('Ошибка: ' + (error instanceof Error ? error.message : String(error)))
+    } finally {
+      setIsAutoFilling(false)
+    }
+  }
+
   const formatMoney = (amount: number, currency: string = 'RUB') => {
     if (amount === null || amount === undefined || isNaN(amount) || !isFinite(amount)) {
       return '0 ₽'
@@ -185,6 +220,26 @@ export function BudgetWidget() {
             </CardDescription>
           </div>
 
+          {/* Auto-fill & Edit Income */}
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-2"
+              onClick={handleAutoFill}
+              disabled={isAutoFilling}
+              title="Рассчитать бюджеты по средним тратам за последние 3 месяца"
+            >
+              {isAutoFilling ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : autoFillDone ? (
+                <CheckCircle2 className="h-4 w-4 text-green-500" />
+              ) : (
+                <Calculator className="h-4 w-4" />
+              )}
+              {autoFillDone ? 'Готово!' : 'Рассчитать'}
+            </Button>
+
           {/* Edit Income Dialog */}
           <Dialog open={isEditingIncome} onOpenChange={setIsEditingIncome}>
             <DialogTrigger asChild>
@@ -222,6 +277,7 @@ export function BudgetWidget() {
               </DialogFooter>
             </DialogContent>
           </Dialog>
+          </div>
         </div>
       </CardHeader>
 
