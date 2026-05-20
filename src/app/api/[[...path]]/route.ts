@@ -1223,7 +1223,7 @@ async function handleImportTransactions(method: string, request: NextRequest) {
     return NextResponse.json({ error: 'transactions array is required' }, { status: 400 })
   }
 
-  const created = []
+  const created: any[] = []
   const errors: Array<{ index: number; error: string }> = []
 
   for (let i = 0; i < transactions.length; i++) {
