@@ -87,6 +87,15 @@ async function ensureTables() {
       await db.$executeRawUnsafe(`ALTER TABLE "Settings" ADD COLUMN "openrouterApiKey" TEXT`)
     } catch (e) { /* Column might already exist */ }
   }
+
+  // Add openrouterModel column to Settings if missing
+  try {
+    await db.$queryRawUnsafe(`SELECT "openrouterModel" FROM "Settings" LIMIT 1`)
+  } catch {
+    try {
+      await db.$executeRawUnsafe(`ALTER TABLE "Settings" ADD COLUMN "openrouterModel" TEXT DEFAULT 'openai/gpt-4o-mini'`)
+    } catch (e) { /* Column might already exist */ }
+  }
 }
 
 // Main handler

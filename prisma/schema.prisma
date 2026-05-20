@@ -86,6 +86,7 @@ model Settings {
   investmentsPercent Float    @default(10)
   passwordHash       String?
   openrouterApiKey   String?
+  openrouterModel    String?  @default("openai/gpt-4o-mini")
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 }

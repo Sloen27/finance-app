@@ -84,17 +84,16 @@ export function ImportTransactions({ open, onOpenChange, onImported }: ImportTra
   const [llmError, setLlmError] = useState('')
   const [showApiKey, setShowApiKey] = useState(false)
   const [openrouterKey, setOpenrouterKey] = useState(settings?.openrouterApiKey || '')
-  const [llmModel, setLlmModel] = useState('openai/gpt-4o-mini')
+  const [llmModel, setLlmModel] = useState(settings?.openrouterModel || 'openai/gpt-4o-mini')
   const [fileName, setFileName] = useState('')
   const [showSettings, setShowSettings] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
 
-  // Sync key when settings loads from DB
+  // Sync key and model when settings loads from DB
   useEffect(() => {
-    if (settings?.openrouterApiKey) {
-      setOpenrouterKey(settings.openrouterApiKey)
-    }
-  }, [settings?.openrouterApiKey])
+    if (settings?.openrouterApiKey) setOpenrouterKey(settings.openrouterApiKey)
+    if (settings?.openrouterModel) setLlmModel(settings.openrouterModel)
+  }, [settings?.openrouterApiKey, settings?.openrouterModel])
 
   const expenseCategories = categories.filter(c => c.type === 'expense')
   const incomeCategories = categories.filter(c => c.type === 'income')

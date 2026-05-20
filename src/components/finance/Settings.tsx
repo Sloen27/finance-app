@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Separator } from '@/components/ui/separator'
 import { Download, Upload, Database, Sun, Moon, RefreshCw, PieChart, Shield, Lock, Sparkles, Eye, EyeOff, CheckCircle2 } from 'lucide-react'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Progress } from '@/components/ui/progress'
 
 export function Settings() {
@@ -29,6 +30,7 @@ export function Settings() {
 
   // OpenRouter API key (stored in DB)
   const [openrouterKey, setOpenrouterKey] = useState(settings?.openrouterApiKey || '')
+  const [openrouterModel, setOpenrouterModel] = useState(settings?.openrouterModel || 'openai/gpt-4o-mini')
   const [showOpenrouterKey, setShowOpenrouterKey] = useState(false)
   const [openrouterSaved, setOpenrouterSaved] = useState(false)
   const [isSavingKey, setIsSavingKey] = useState(false)
@@ -39,7 +41,7 @@ export function Settings() {
       const response = await fetch('/api/settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ openrouterApiKey: openrouterKey.trim() })
+        body: JSON.stringify({ openrouterApiKey: openrouterKey.trim(), openrouterModel })
       })
       const data = await response.json()
       setSettings(data)
@@ -67,6 +69,7 @@ export function Settings() {
       setSavingsPercent(settings.savingsPercent?.toString() || '10')
       setInvestmentsPercent(settings.investmentsPercent?.toString() || '10')
       setOpenrouterKey(settings.openrouterApiKey || '')
+      setOpenrouterModel(settings.openrouterModel || 'openai/gpt-4o-mini')
     }
   }, [settings])
 
@@ -543,8 +546,24 @@ export function Settings() {
                 }
               </Button>
             </div>
+            <div className="space-y-2">
+              <Label htmlFor="openrouter-model">Модель по умолчанию</Label>
+              <Select value={openrouterModel} onValueChange={setOpenrouterModel}>
+                <SelectTrigger id="openrouter-model" className="max-w-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="openai/gpt-4o-mini">GPT-4o Mini — быстро и дёшево</SelectItem>
+                  <SelectItem value="openai/gpt-4o">GPT-4o — точнее</SelectItem>
+                  <SelectItem value="anthropic/claude-3-haiku">Claude 3 Haiku — быстро</SelectItem>
+                  <SelectItem value="anthropic/claude-3.5-sonnet">Claude 3.5 Sonnet — лучшее качество</SelectItem>
+                  <SelectItem value="google/gemini-flash-1.5">Gemini Flash 1.5</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
             <p className="text-xs text-muted-foreground">
-              Ключ хранится только в браузере. Получить ключ:{' '}
+              Ключ хранится в базе данных. Получить ключ:{' '}
               <a
                 href="https://openrouter.ai/keys"
                 target="_blank"

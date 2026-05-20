@@ -53,6 +53,7 @@ export interface Settings {
   investmentsPercent: number
   passwordHash: string | null
   openrouterApiKey: string | null
+  openrouterModel: string | null
 }
 
 export interface Account {
