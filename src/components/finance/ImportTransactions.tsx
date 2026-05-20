@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import * as XLSX from 'xlsx'
 import { useFinanceStore } from '@/store/finance'
 import { Button } from '@/components/ui/button'
