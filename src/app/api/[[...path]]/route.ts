@@ -144,6 +144,10 @@ async function handleRequest(request: NextRequest, method: string) {
         return await handleBudgetStats(method, request)
       case 'auth':
         return await handleAuth(method, id, request)
+      case 'import-transactions':
+        return await handleImportTransactions(method, request)
+      case 'categorize':
+        return await handleCategorize(method, request)
       default:
         return NextResponse.json({ error: 'Not found', resource }, { status: 404 })
     }
@@ -328,15 +332,17 @@ async function handleAccounts(method: string, id: string | undefined, subResourc
       return NextResponse.json({ error: 'Account not found' }, { status: 404 })
     }
     
-    await db.account.update({ where: { id: fromAccountId }, data: { balance: fromAccount.balance - amount } })
-    await db.account.update({ where: { id: toAccountId }, data: { balance: toAccount.balance + amount } })
+    await db.$transaction([
+      db.account.update({ where: { id: fromAccountId }, data: { balance: fromAccount.balance - amount } }),
+      db.account.update({ where: { id: toAccountId }, data: { balance: toAccount.balance + amount } })
+    ])
     
     return NextResponse.json({ success: true })
   }
   
   if (id && subResource === 'history') {
     try {
-      const history = await db.$queryRawUnsafe(`SELECT * FROM "BalanceHistory" WHERE "accountId" = '${id}' ORDER BY date DESC`)
+      const history = await db.$queryRaw`SELECT * FROM "BalanceHistory" WHERE "accountId" = ${id} ORDER BY date DESC`
       return NextResponse.json(history)
     } catch {
       return NextResponse.json([])
@@ -1183,7 +1189,9 @@ async function handleAuth(method: string, action: string | undefined, request: N
     }
     
     if (action === 'logout') {
-      return NextResponse.json({ success: true })
+      const response = NextResponse.json({ success: true })
+      response.cookies.delete('session')
+      return response
     }
     
     return NextResponse.json({ error: 'Invalid auth action' }, { status: 400 })
@@ -1193,5 +1201,171 @@ async function handleAuth(method: string, action: string | undefined, request: N
       error: 'Ошибка авторизации', 
       details: error instanceof Error ? error.message : 'Unknown error' 
     }, { status: 500 })
+  }
+}
+
+
+// === IMPORT TRANSACTIONS ===
+async function handleImportTransactions(method: string, request: NextRequest) {
+  if (method !== 'POST') {
+    return NextResponse.json({ error: 'Method not allowed' }, { status: 405 })
+  }
+
+  let body
+  try {
+    body = await request.json()
+  } catch {
+    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
+  }
+
+  const { transactions } = body
+  if (!Array.isArray(transactions) || transactions.length === 0) {
+    return NextResponse.json({ error: 'transactions array is required' }, { status: 400 })
+  }
+
+  const created = []
+  const errors: Array<{ index: number; error: string }> = []
+
+  for (let i = 0; i < transactions.length; i++) {
+    const t = transactions[i]
+    try {
+      if (!t.categoryId) {
+        errors.push({ index: i, error: 'categoryId is required' })
+        continue
+      }
+
+      const category = await db.category.findUnique({ where: { id: t.categoryId } })
+      if (!category) {
+        errors.push({ index: i, error: `Category not found: ${t.categoryId}` })
+        continue
+      }
+
+      const parsedDate = new Date(t.date)
+      if (isNaN(parsedDate.getTime())) {
+        errors.push({ index: i, error: `Invalid date: ${t.date}` })
+        continue
+      }
+
+      const parsedAmount = typeof t.amount === 'string' ? parseFloat(t.amount) : t.amount
+      if (typeof parsedAmount !== 'number' || isNaN(parsedAmount)) {
+        errors.push({ index: i, error: `Invalid amount: ${t.amount}` })
+        continue
+      }
+
+      const transaction = await db.transaction.create({
+        data: {
+          type: t.type || (parsedAmount >= 0 ? 'income' : 'expense'),
+          amount: Math.abs(parsedAmount),
+          currency: t.currency || 'RUB',
+          categoryId: t.categoryId,
+          date: parsedDate,
+          comment: t.comment || null,
+          accountId: t.accountId || null,
+        },
+        include: { category: true, account: true }
+      })
+      created.push(transaction)
+    } catch (e) {
+      errors.push({ index: i, error: e instanceof Error ? e.message : String(e) })
+    }
+  }
+
+  return NextResponse.json({
+    success: true,
+    created: created.length,
+    errors: errors.length,
+    errorDetails: errors,
+    transactions: created
+  })
+}
+
+// === CATEGORIZE WITH LLM (OpenRouter) ===
+async function handleCategorize(method: string, request: NextRequest) {
+  if (method !== 'POST') {
+    return NextResponse.json({ error: 'Method not allowed' }, { status: 405 })
+  }
+
+  let body
+  try {
+    body = await request.json()
+  } catch {
+    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
+  }
+
+  const { transactions, categories, apiKey, model = 'openai/gpt-4o-mini' } = body
+
+  if (!apiKey) {
+    return NextResponse.json({ error: 'OpenRouter API key required' }, { status: 400 })
+  }
+  if (!Array.isArray(transactions) || !Array.isArray(categories)) {
+    return NextResponse.json({ error: 'transactions and categories are required' }, { status: 400 })
+  }
+
+  const categoriesList = categories
+    .map((c: { id: string; name: string; type: string }) => `${c.id}|${c.name}|${c.type}`)
+    .join('\n')
+
+  const transactionsList = transactions
+    .map((t: { description: string; bankCategory: string; amount: number }, i: number) =>
+      `${i}|${t.description}|${t.bankCategory}|${t.amount >= 0 ? 'income' : 'expense'}`
+    )
+    .join('\n')
+
+  const prompt = `Categorize these bank transactions into the provided categories.
+
+CATEGORIES (id|name|type):
+${categoriesList}
+
+TRANSACTIONS (index|description|bankCategory|type):
+${transactionsList}
+
+Rules:
+- Match each transaction to the most appropriate category
+- Use type (income/expense) to filter - income transactions go to income categories, expenses to expense categories
+- "Переводы" without context → "Прочее" or similar catch-all
+- "Зарплата" → income category
+- Return ONLY valid JSON, no markdown
+
+Response format: {"results":[{"index":0,"categoryId":"..."}]}`
+
+  try {
+    const llmResponse = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://finance-app.vercel.app',
+        'X-Title': 'Finance App'
+      },
+      body: JSON.stringify({
+        model,
+        messages: [{ role: 'user', content: prompt }],
+        response_format: { type: 'json_object' },
+        temperature: 0.1
+      })
+    })
+
+    const data = await llmResponse.json()
+
+    if (!llmResponse.ok) {
+      return NextResponse.json(
+        { error: data.error?.message || 'OpenRouter error', details: data },
+        { status: 500 }
+      )
+    }
+
+    const rawContent = data.choices?.[0]?.message?.content
+    if (!rawContent) {
+      return NextResponse.json({ error: 'Empty response from LLM' }, { status: 500 })
+    }
+
+    const result = JSON.parse(rawContent)
+    return NextResponse.json(result)
+  } catch (e) {
+    console.error('Categorize error:', e)
+    return NextResponse.json(
+      { error: e instanceof Error ? e.message : 'Unknown error' },
+      { status: 500 }
+    )
   }
 }

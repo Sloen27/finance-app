@@ -72,9 +72,15 @@ export function Analytics() {
     try {
       const response = await fetch(`/api/analytics?month=${currentMonth}&compare=true`)
       const data = await response.json()
+      if (!response.ok) {
+        console.error('Analytics API error:', data.error || data)
+        setAnalyticsData(null)
+        return
+      }
       setAnalyticsData(data)
     } catch (error) {
       console.error('Error fetching analytics:', error)
+      setAnalyticsData(null)
     } finally {
       setIsLoading(false)
     }

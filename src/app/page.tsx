@@ -89,7 +89,7 @@ export default function Home() {
         // Fetch all data in parallel
         const [categoriesRes, transactionsRes, budgetsRes, regularPaymentsRes, settingsRes, accountsRes, goalsRes, investmentsRes, incomeRes, budgetStatsRes] = await Promise.all([
           fetch('/api/categories'),
-          fetch('/api/transactions'),
+          fetch(`/api/transactions?month=${currentMonth}`),
           fetch('/api/budgets'),
           fetch('/api/regular-payments'),
           fetch('/api/settings'),

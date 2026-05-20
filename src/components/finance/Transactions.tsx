@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useFinanceStore } from '@/store/finance'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -12,7 +12,8 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Progress } from '@/components/ui/progress'
-import { Plus, Pencil, Trash2, Filter, ArrowUpRight, ArrowDownRight, List, Calendar as CalendarIcon, ChevronLeft, ChevronRight, PieChart, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react'
+import { Plus, Pencil, Trash2, Filter, ArrowUpRight, ArrowDownRight, List, Calendar as CalendarIcon, ChevronLeft, ChevronRight, PieChart, ArrowUpDown, ArrowUp, ArrowDown, Upload } from 'lucide-react'
+import { ImportTransactions } from './ImportTransactions'
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, isToday, addMonths, subMonths, isWeekend } from 'date-fns'
 import { ru } from 'date-fns/locale'
 
@@ -44,6 +45,11 @@ export function Transactions() {
 
   // Calendar state
   const [calendarDate, setCalendarDate] = useState(new Date(currentMonth + '-01'))
+
+  // Sync calendar month when global month selector changes
+  useEffect(() => {
+    setCalendarDate(new Date(currentMonth + '-01'))
+  }, [currentMonth])
   const [selectedDay, setSelectedDay] = useState<Date | null>(null)
   const [isDayDialogOpen, setIsDayDialogOpen] = useState(false)
 
@@ -55,6 +61,7 @@ export function Transactions() {
   const [filterType, setFilterType] = useState<string>('all')
   const [filterCategory, setFilterCategory] = useState<string>('all')
   const [filterCurrency, setFilterCurrency] = useState<string>('all')
+  const [isImportOpen, setIsImportOpen] = useState(false)
 
   // Helper to safely parse date
   const safeParseDate = (dateValue: any): Date | null => {
@@ -102,6 +109,7 @@ export function Transactions() {
           body: JSON.stringify(formData)
         })
         const data = await response.json()
+        if (!response.ok) throw new Error(data.error || 'Ошибка при обновлении транзакции')
         updateTransaction(editingTransaction, data)
       } else {
         const response = await fetch('/api/transactions', {
@@ -110,6 +118,7 @@ export function Transactions() {
           body: JSON.stringify(formData)
         })
         const data = await response.json()
+        if (!response.ok) throw new Error(data.error || 'Ошибка при создании транзакции')
         addTransaction(data)
       }
 
@@ -118,6 +127,7 @@ export function Transactions() {
       setFormData(initialFormData)
     } catch (error) {
       console.error('Error saving transaction:', error)
+      alert(error instanceof Error ? error.message : 'Ошибка при сохранении транзакции')
     }
   }
 
@@ -603,6 +613,16 @@ export function Transactions() {
           )}
         </CardContent>
       </Card>
+
+      {/* Import Transactions Dialog */}
+      <ImportTransactions
+        open={isImportOpen}
+        onOpenChange={setIsImportOpen}
+        onImported={(imported) => {
+          imported.forEach(t => addTransaction(t))
+          setIsImportOpen(false)
+        }}
+      />
 
       {/* Day Transactions Dialog */}
       <Dialog open={isDayDialogOpen} onOpenChange={setIsDayDialogOpen}>
