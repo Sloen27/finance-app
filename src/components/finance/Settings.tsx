@@ -43,12 +43,17 @@ export function Settings() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ openrouterApiKey: openrouterKey.trim(), openrouterModel })
       })
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}))
+        throw new Error(err.error || 'Failed to save settings')
+      }
       const data = await response.json()
       setSettings(data)
       setOpenrouterSaved(true)
       setTimeout(() => setOpenrouterSaved(false), 2000)
     } catch (error) {
       console.error('Error saving OpenRouter key:', error)
+      alert('Ошибка сохранения ключа: ' + (error instanceof Error ? error.message : String(error)))
     } finally {
       setIsSavingKey(false)
     }

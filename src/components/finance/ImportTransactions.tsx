@@ -86,6 +86,7 @@ export function ImportTransactions({ open, onOpenChange, onImported }: ImportTra
   const [openrouterKey, setOpenrouterKey] = useState(settings?.openrouterApiKey || '')
   const [llmModel, setLlmModel] = useState(settings?.openrouterModel || 'openai/gpt-4o-mini')
   const [fileName, setFileName] = useState('')
+  const [llmChangedIndices, setLlmChangedIndices] = useState<Set<number>>(new Set())
   const [showSettings, setShowSettings] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
 
@@ -123,7 +124,7 @@ export function ImportTransactions({ open, onOpenChange, onImported }: ImportTra
         const data = new Uint8Array(e.target?.result as ArrayBuffer)
         const wb = XLSX.read(data, { type: 'array', cellDates: true })
         const ws = wb.Sheets[wb.SheetNames[0]]
-        const raw = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, dateNF: 'yyyy-mm-dd hh:mm:ss' }) as any[][]
+        const raw = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, cellDates: true }) as any[][]
 
         const parsed: ParsedRow[] = []
         for (let i = 1; i < raw.length; i++) {
@@ -171,6 +172,7 @@ export function ImportTransactions({ open, onOpenChange, onImported }: ImportTra
         }
 
         setRows(parsed)
+        setLlmChangedIndices(new Set())
         setStep('preview')
       } catch (err) {
         console.error('Parse error:', err)
@@ -235,15 +237,18 @@ export function ImportTransactions({ open, onOpenChange, onImported }: ImportTra
       }
 
       let selectedIdx = 0
-      setRows(prev => prev.map(row => {
+      const changed = new Set<number>()
+      setRows(prev => prev.map((row, globalIdx) => {
         if (!row.selected) return row
         const catId = resultsMap[selectedIdx]
         selectedIdx++
         if (catId && categories.find(c => c.id === catId)) {
+          if (catId !== row.categoryId) changed.add(globalIdx)
           return { ...row, categoryId: catId }
         }
         return row
       }))
+      setLlmChangedIndices(changed)
     } catch (err) {
       setLlmError(err instanceof Error ? err.message : 'Неизвестная ошибка')
     } finally {
@@ -304,7 +309,7 @@ export function ImportTransactions({ open, onOpenChange, onImported }: ImportTra
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="w-[95vw] max-w-[1200px] max-h-[92vh] flex flex-col p-4 sm:p-6">
+      <DialogContent className="!max-w-none w-[96vw] max-h-[92vh] flex flex-col p-4 gap-0">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <FileSpreadsheet className="h-5 w-5 text-green-600" />
@@ -458,7 +463,9 @@ export function ImportTransactions({ open, onOpenChange, onImported }: ImportTra
                     <tr
                       key={i}
                       className={`border-t transition-colors ${
-                        row.selected ? 'hover:bg-accent/50' : 'opacity-40 bg-muted/20'
+                        !row.selected ? 'opacity-40 bg-muted/20' :
+                        llmChangedIndices.has(i) ? 'bg-purple-50 dark:bg-purple-950/20 hover:bg-purple-100 dark:hover:bg-purple-900/30' :
+                        'hover:bg-accent/50'
                       }`}
                     >
                       <td className="p-2 text-center">
@@ -489,11 +496,17 @@ export function ImportTransactions({ open, onOpenChange, onImported }: ImportTra
                         {row.amount.toLocaleString('ru-RU')} {row.currency}
                       </td>
                       <td className="p-2">
+                        {llmChangedIndices.has(i) && (
+                          <span className="text-[10px] text-purple-600 dark:text-purple-400 font-medium mb-0.5 flex items-center gap-0.5">
+                            <Sparkles className="h-2.5 w-2.5" />LLM
+                          </span>
+                        )}
                         <Select
                           value={row.categoryId}
-                          onValueChange={catId =>
+                          onValueChange={catId => {
                             setRows(prev => prev.map((r, j) => j === i ? { ...r, categoryId: catId } : r))
-                          }
+                            setLlmChangedIndices(prev => { const n = new Set(prev); n.delete(i); return n })
+                          }}
                         >
                           <SelectTrigger className="h-7 text-xs w-full">
                             <SelectValue placeholder="Выбрать..." />
