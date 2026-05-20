@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Separator } from '@/components/ui/separator'
-import { Download, Upload, Database, Sun, Moon, RefreshCw, PieChart, Shield, Lock } from 'lucide-react'
+import { Download, Upload, Database, Sun, Moon, RefreshCw, PieChart, Shield, Lock, Sparkles, Eye, EyeOff, CheckCircle2 } from 'lucide-react'
 import { Progress } from '@/components/ui/progress'
 
 export function Settings() {
@@ -26,6 +26,19 @@ export function Settings() {
   const [passwordError, setPasswordError] = useState('')
   const [passwordSuccess, setPasswordSuccess] = useState('')
   const [isChangingPassword, setIsChangingPassword] = useState(false)
+
+  // OpenRouter API key (stored in localStorage)
+  const [openrouterKey, setOpenrouterKey] = useState(() =>
+    typeof window !== 'undefined' ? localStorage.getItem('openrouter_api_key') || '' : ''
+  )
+  const [showOpenrouterKey, setShowOpenrouterKey] = useState(false)
+  const [openrouterSaved, setOpenrouterSaved] = useState(false)
+
+  const handleSaveOpenrouterKey = () => {
+    localStorage.setItem('openrouter_api_key', openrouterKey.trim())
+    setOpenrouterSaved(true)
+    setTimeout(() => setOpenrouterSaved(false), 2000)
+  }
 
   // Distribution percentages
   const [mandatoryPercent, setMandatoryPercent] = useState('50')
@@ -473,6 +486,69 @@ export function Settings() {
               Сохраните файл в безопасном месте.
             </p>
           </div>
+        </CardContent>
+      </Card>
+
+      {/* OpenRouter Integration */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Sparkles className="h-5 w-5 text-purple-500" />
+            Интеграции — OpenRouter
+          </CardTitle>
+          <CardDescription>
+            API ключ для авто-категоризации транзакций через LLM при импорте выписки
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-2 max-w-md">
+            <Label htmlFor="openrouter-key">OpenRouter API Key</Label>
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <Input
+                  id="openrouter-key"
+                  type={showOpenrouterKey ? 'text' : 'password'}
+                  placeholder="sk-or-v1-..."
+                  value={openrouterKey}
+                  onChange={(e) => setOpenrouterKey(e.target.value)}
+                  className="pr-10"
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="absolute right-1 top-1 h-7 w-7"
+                  onClick={() => setShowOpenrouterKey(s => !s)}
+                >
+                  {showOpenrouterKey ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+                </Button>
+              </div>
+              <Button onClick={handleSaveOpenrouterKey} variant="outline">
+                {openrouterSaved
+                  ? <><CheckCircle2 className="h-4 w-4 mr-2 text-green-500" />Сохранено</>
+                  : 'Сохранить'
+                }
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Ключ хранится только в браузере. Получить ключ:{' '}
+              <a
+                href="https://openrouter.ai/keys"
+                target="_blank"
+                rel="noreferrer"
+                className="underline hover:text-foreground"
+              >
+                openrouter.ai/keys
+              </a>
+            </p>
+          </div>
+
+          {openrouterKey && (
+            <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
+              <CheckCircle2 className="h-4 w-4" />
+              Ключ задан — авто-категоризация доступна в разделе Транзакции → Импорт
+            </div>
+          )}
         </CardContent>
       </Card>
 
